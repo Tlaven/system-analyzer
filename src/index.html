@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Analyzer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#fafafa;--tlbg:rgba(255,255,255,.92);--tlbdr:#e0e0e0;--tbtn:#fff;--tbtnb:#d0d0d0;--tbtnc:#444;--tbtn-hbg:#eef6ff;--tbtn-hb:#90caf9;--tbtn-hc:#1565c0;--tsep:#e0e0e0;--ttext:#888;--tthov:#f0f0f0;--pnl:#fff;--pnls:rgba(0,0,0,.08);--pnlhd:#222;--pnlcl:#aaa;--pnlch:#666;--flbl:#888;--ibg:#fff;--ibd:#ddd;--ifc:#333;--ifc2:#1976d2;--propbd:#e0e0e0;--propbtn:#fff;--propbtc:#999;--propbt-hbg:#fff0f0;--propbt-hb:#ef9a9a;--propbt-hc:#e53935;--addpbg:#fafafa;--addpbd:#ddd;--addp-hbg:#f0f4ff;--addp-hb:#90caf9;--addp-hc:#1976d2;--delb:#fff;--delbd:#e57373;--delc:#e57373;--del-hbg:#fff5f5;--pid:#bbb;--psubbg:#f8f8f8;--psubc:#999;--eh:#bbb;--ehkbg:#f0f0f0;--ehkbd:#e0e0e0;--tinpbg:#fff}
+html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;background:var(--bg)}
+.dark{--bg:#1a1a2e;--tlbg:rgba(30,30,50,.95);--tlbdr:#333;--tbtn:#2a2a3e;--tbtnb:#555;--tbtnc:#ccc;--tbtn-hbg:#333;--tbtn-hb:#64b5f6;--tbtn-hc:#64b5f6;--tsep:#444;--ttext:#888;--tthov:#333;--pnl:#222;--pnls:rgba(0,0,0,.4);--pnlhd:#ddd;--pnlcl:#666;--pnlch:#999;--flbl:#999;--ibg:#333;--ibd:#555;--ifc:#ddd;--ifc2:#64b5f6;--propbd:#555;--propbtn:#333;--propbtc:#999;--propbt-hbg:#3a2a2a;--propbt-hb:#c62828;--propbt-hc:#ef5350;--addpbg:#2a2a3e;--addpbd:#555;--addp-hbg:#333;--addp-hb:#64b5f6;--addp-hc:#64b5f6;--delb:#2a2a3e;--delbd:#c62828;--delc:#ef5350;--del-hbg:#3a2020;--pid:#666;--psubbg:#2a2a3e;--psubc:#999;--eh:#666;--ehkbg:#333;--ehkbd:#555;--tinpbg:#333}
+#canvas{display:block;cursor:default}
+#toolbar{position:fixed;top:0;left:0;right:0;height:40px;background:var(--tlbg);border-bottom:1px solid var(--tlbdr);display:flex;align-items:center;padding:0 12px;gap:6px;z-index:10;-webkit-user-select:none;user-select:none}
+#toolbar button{padding:4px 11px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit;color:var(--tbtnc);transition:background .15s}
+#toolbar button:hover{background:var(--tbtn-hbg);border-color:var(--tbtn-hb);color:var(--tbtn-hc)}
+#toolbar .sep{width:1px;height:20px;background:var(--tsep);margin:0 4px}
+#theme-btn{padding:0 6px;font-size:16px;line-height:1}
+#graph-title{margin-left:auto;font-size:13px;color:var(--ttext)}
+#graph-title span{cursor:pointer;padding:2px 6px;border-radius:3px}
+#graph-title span:hover{background:var(--tthov)}
+#panel{position:fixed;top:40px;right:0;width:300px;height:calc(100% - 40px);background:var(--pnl);box-shadow:-2px 0 12px var(--pnls);z-index:20;transition:transform .22s ease;overflow-y:auto;padding:0}
+#panel.hidden{transform:translateX(100%)}
+#panel-header{display:flex;justify-content:space-between;align-items:center;padding:16px 16px 0;font-size:15px;font-weight:600;color:var(--pnlhd)}
+#panel-close{background:none;border:none;font-size:22px;cursor:pointer;color:var(--pnlcl);padding:0 4px;line-height:1}
+#panel-close:hover{color:var(--pnlch)}
+#panel-body{padding:12px 16px 24px}
+.field{margin-bottom:14px}
+.field .fl{display:block;font-size:12px;color:var(--flbl);margin-bottom:3px}
+.field input,.field textarea,.field select{width:100%;padding:7px 9px;border:1px solid var(--ibd);border-radius:5px;font-size:13px;font-family:inherit;color:var(--ifc);background:var(--ibg);outline:none;transition:border-color .15s}
+.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--ifc2)}
+.field textarea{min-height:56px;resize:vertical}
+.field input.conflict{border-color:#e53935;background:#fff5f5}
+.prop-title{font-size:12px;color:var(--flbl);margin-bottom:4px}
+.prop-row{display:flex;gap:4px;margin-bottom:5px}
+.prop-row input{flex:1;padding:4px 6px;border:1px solid var(--propbd);border-radius:4px;font-size:12px;outline:none;background:var(--ibg);color:var(--ifc)}
+.prop-row input:focus{border-color:var(--ifc2)}
+.prop-row button{width:26px;padding:0;background:var(--propbtn);border:1px solid var(--propbd);border-radius:4px;cursor:pointer;font-size:16px;color:var(--propbtc);display:flex;align-items:center;justify-content:center}
+.prop-row button:hover{background:var(--propbt-hbg);border-color:var(--propbt-hb);color:var(--propbt-hc)}
+.btn-add-prop{width:100%;padding:5px 0;background:var(--addpbg);border:1px dashed var(--addpbd);border-radius:5px;cursor:pointer;font-size:12px;color:var(--addp-hc);font-family:inherit;transition:background .15s}
+.btn-add-prop:hover{background:var(--addp-hbg);border-color:var(--addp-hb);color:var(--addp-hc)}
+.btn-del{width:100%;padding:8px;background:var(--delb);border:1px solid var(--delbd);color:var(--delc);border-radius:5px;cursor:pointer;font-size:13px;font-family:inherit;margin-top:8px;transition:background .15s}
+.btn-del:hover{background:var(--del-hbg)}
+.panel-id{font-size:11px;color:var(--pid);margin-bottom:4px;word-break:break-all}
+.panel-sub{font-size:12px;color:var(--psubc);margin-bottom:12px;padding:6px 8px;background:var(--psubbg);border-radius:4px;line-height:1.5}
+.empty-hint{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:var(--eh);font-size:15px;pointer-events:none;line-height:2;-webkit-user-select:none;user-select:none}
+.empty-hint kbd{padding:2px 8px;background:var(--ehkbg);border-radius:4px;border:1px solid var(--ehkbd);font-family:inherit;font-size:13px}
+.title-input{border:1px solid var(--ifc2);border-radius:3px;padding:2px 6px;font-size:13px;font-family:inherit;outline:none;background:var(--tinpbg);color:var(--ifc)}
+.tip{position:fixed;padding:6px 10px;background:rgba(0,0,0,.82);color:#fff;border-radius:5px;font-size:12px;pointer-events:none;z-index:30;max-width:320px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.tip.hidden{display:none}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.3);z-index:40;display:flex;align-items:center;justify-content:center}
+.modal-overlay.hidden{display:none}
+.modal-box{background:var(--pnl);border:1px solid var(--tlbdr);border-radius:8px;padding:14px 16px;width:480px;max-width:90vw;box-shadow:0 4px 20px rgba(0,0,0,.15)}
+.modal-box textarea{width:100%;height:240px;border:1px solid var(--tlbdr);border-radius:5px;padding:8px 10px;font-family:'Cascadia Code','Fira Code','Consolas',monospace;font-size:12px;background:var(--ibg);color:var(--ifc);resize:vertical;outline:none}
+.modal-box textarea:focus{border-color:var(--ifc2)}
+.btn-primary{padding:6px 18px;background:#1976d2;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-family:inherit}
+.btn-primary:hover{background:#1565c0}
+/* --- Dropdown menus --- */
+.menu-group{position:relative}
+.menu-trigger{padding:4px 10px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit;color:var(--tbtnc);transition:background .15s;white-space:nowrap}
+.menu-trigger:hover,.menu-trigger.open{background:var(--tbtn-hbg);border-color:var(--tbtn-hb);color:var(--tbtn-hc)}
+.dropdown-menu{position:absolute;top:100%;left:0;min-width:160px;background:var(--pnl);border:1px solid var(--tlbdr);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:100;padding:4px 0;display:none}
+.dropdown-menu.open{display:block}
+.dropdown-menu .menu-item{padding:7px 14px;font-size:13px;cursor:pointer;color:var(--ifc);transition:background .1s;white-space:nowrap}
+.dropdown-menu .menu-item:hover{background:var(--tbtn-hbg);color:var(--tbtn-hc)}
+.dropdown-menu .menu-sep{height:1px;background:var(--tsep);margin:4px 8px}
+.dropdown-menu .menu-label{padding:6px 14px 2px;font-size:11px;color:var(--flbl);cursor:default}
+.dropdown-menu select{width:100%;padding:4px 8px;border:1px solid var(--ibd);border-radius:4px;font-size:12px;font-family:inherit;background:var(--ibg);color:var(--ifc);outline:none;margin:2px 0}
+.dropdown-menu .menu-row{display:flex;align-items:center;gap:8px;padding:3px 14px;font-size:13px;color:var(--ifc)}
+.dropdown-menu .menu-row select{width:auto;flex:1}
+.dropdown-menu .menu-child{padding:2px 14px 2px 32px;font-size:12px}
+.dropdown-menu .menu-child span{font-size:11px;opacity:.75}
+#burger-btn{padding:4px 8px;font-size:16px;line-height:1;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;color:var(--tbtnc)}
+#burger-btn:hover{background:var(--tbtn-hbg);border-color:var(--tbtn-hb);color:var(--tbtn-hc)}
+/* Theme dropdown */
+#theme-dropdown{left:auto;right:0;min-width:170px}
+#theme-dropdown .theme-row{display:flex;align-items:center;gap:8px;padding:8px 14px}
+#theme-dropdown .theme-row label{font-size:13px;color:var(--ifc);cursor:pointer}
+#theme-dropdown input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:var(--tsep);outline:none}
+#theme-dropdown input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:var(--ifc2);cursor:pointer;border:2px solid var(--pnl)}
+#theme-dropdown .palette-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px 10px 6px}
+#theme-dropdown .palette-item{padding:6px 8px;border-radius:4px;cursor:pointer;text-align:center;font-size:12px;border:1px solid transparent;transition:all .1s;color:var(--ifc)}
+#theme-dropdown .palette-item:hover{border-color:var(--accent,var(--ifc2))}
+#theme-dropdown .palette-item.active{border-color:var(--accent,var(--ifc2));background:var(--tbtn-hbg)}
+#code-panel{position:fixed;top:40px;left:0;width:520px;height:calc(100% - 40px);background:var(--pnl);box-shadow:2px 0 12px var(--pnls);z-index:15;display:flex;flex-direction:column}
+#code-panel.hidden{display:none}
+#code-panel-header{padding:6px 14px;font-size:12px;color:var(--flbl);border-bottom:1px solid var(--tlbdr);display:flex;justify-content:space-between;align-items:center;background:var(--tthov)}
+#code-panel-header .title{font-weight:500;color:var(--ifc)}
+#code-panel-header .hint{font-size:11px;opacity:.7}
+#code-panel-body{flex:1;overflow:auto;font-size:13px}
+#code-panel-body .cm-editor{height:100%}
+#code-panel-body .cm-scroller{overflow:auto}
+#code-panel-error{padding:6px 14px;font-size:12px;color:#e53935;background:#fff5f5;border-top:1px solid #e53935;font-family:'Cascadia Code','Fira Code','Consolas',monospace}
+#code-panel-error.hidden{display:none}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button id="burger-btn" onclick="toggleBurger()" title="关于">☰</button>
+  <div class="menu-group">
+    <button class="menu-trigger" data-menu="file" onclick="toggleMenu('file')">文件 ▾</button>
+    <div class="dropdown-menu" data-menu="file">
+      <div class="menu-item" onclick="onNew()">新建</div>
+      <div class="menu-sep"></div>
+      <div class="menu-item" onclick="document.getElementById('import-input').click()">导入 JSON</div>
+      <div class="menu-sep"></div>
+      <div class="menu-item" onclick="onExport()">导出 JSON</div>
+      <div class="menu-item" onclick="shareURL()">分享</div>
+    </div>
+  </div>
+  <div class="menu-group">
+    <button class="menu-trigger" data-menu="view" onclick="toggleMenu('view')">视图 ▾</button>
+    <div class="dropdown-menu" data-menu="view">
+      <div class="menu-item" onclick="fitToView()">适应画布</div>
+      <div class="menu-item" onclick="resetZoom()">重置缩放 100%</div>
+    </div>
+  </div>
+  <div class="menu-group">
+    <button class="menu-trigger" data-menu="style" onclick="toggleMenu('style')">样式 ▾</button>
+    <div class="dropdown-menu" data-menu="style">
+      <div class="menu-label">自动布局</div>
+      <div class="menu-row"><span>布局</span><select id="sel-layout" onchange="applyLayout(this.value)">
+        <option value="manual">手动</option><option value="force">力导向</option>
+        <option value="circular">圆形</option><option value="hierarchical">层次</option>
+      </select></div>
+      <div class="menu-sep"></div>
+      <div class="menu-label">内容</div>
+      <div class="menu-row"><span>信息密度</span><select id="sel-info" onchange="onStyleChange('infoLevel',this.value)">
+        <option value="minimal">极简</option><option value="medium">卡片</option><option value="full">完整</option>
+      </select></div>
+      <div class="menu-row menu-child"><span>节点形状</span><select id="sel-shape" onchange="onStyleChange('nodeShape',this.value)">
+        <option value="rounded">圆角矩形</option><option value="circle">圆形</option><option value="capsule">胶囊</option>
+      </select></div>
+      <div class="menu-sep"></div>
+      <div class="menu-label">连线</div>
+      <div class="menu-row"><span>边样式</span><select id="sel-edge" onchange="onStyleChange('edgeStyle',this.value)">
+        <option value="straight">直线</option><option value="curve">曲线</option><option value="polyline">折线</option>
+      </select></div>
+      <div class="menu-sep"></div>
+      <div class="menu-label">布局</div>
+      <div class="menu-row"><span>位置模式</span><select id="sel-pos" onchange="setPositionMode(this.value)">
+        <option value="manual">手动</option><option value="elastic">弹性物理</option>
+      </select></div>
+      <div class="menu-row menu-child"><span>边动画</span><select id="sel-anim" onchange="onStyleChange('edgeAnim',this.value)">
+        <option value="none">无</option><option value="dashFlow">虚线流动</option><option value="particleFlow">粒子流动</option>
+      </select></div>
+      <div class="menu-sep"></div>
+      <div class="menu-label">高级</div>
+      <div class="menu-row"><span>执行模式</span><select id="sel-exec" onchange="setExecMode(this.value)">
+        <option value="off">关闭</option><option value="manual">手动</option><option value="auto">自动</option><option value="step">步进</option>
+      </select></div>
+    </div>
+  </div>
+  <input id="search-input" type="text" placeholder="搜索节点…" style="width:90px;padding:3px 7px;border:1px solid var(--tbtnb);border-radius:4px;font-size:12px;font-family:inherit;background:var(--tinpbg);color:var(--ifc);outline:none">
+  <div class="sep"></div>
+  <span id="zoom-display" onclick="resetZoom()" style="cursor:pointer;font-size:12px;color:var(--ttext);min-width:40px;text-align:center" title="点击重置为 100%">100%</span>
+  <button id="step-btn" onclick="stepOnce()" style="display:none;padding:4px 10px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;color:var(--tbtnc)">▶ 下一步</button>
+  <div class="sep"></div>
+  <button onclick="toggleCodeView()" title="代码编辑器" style="padding:4px 11px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:13px;font-family:'Cascadia Code','Consolas',monospace;color:var(--tbtnc)">&lt;/&gt;</button>
+  <button onclick="resetRuntime()" title="重置运行时（丢弃方法体 mutation，回到 sourceCode 初始）" style="padding:4px 11px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit;color:var(--tbtnc)">↻</button>
+  <div class="sep"></div>
+  <div class="menu-group">
+    <button id="theme-btn" class="menu-trigger" data-menu="theme" onclick="toggleMenu('theme')" title="主题">🎨</button>
+    <div class="dropdown-menu" id="theme-dropdown" data-menu="theme">
+      <div class="theme-row">
+        <span style="font-size:12px;color:var(--flbl);min-width:32px">亮度</span>
+        <input type="range" id="brightness-slider" min="0" max="100" value="0" oninput="setBrightness(this.value)" style="flex:1;height:4px;cursor:pointer;accent-color:var(--accent,var(--ifc2))">
+        <span id="brightness-label" style="font-size:11px;color:var(--ifc);min-width:28px;text-align:right">0%</span>
+      </div>
+      <div class="menu-sep"></div>
+      <div class="menu-label">配色方案</div>
+      <div class="palette-grid" id="palette-grid">
+        <!-- populated by JS -->
+      </div>
+    </div>
+  </div>
+  <div id="graph-title"><span id="title-text">系统模型</span></div>
+</div>
+<input type="file" id="import-input" accept=".js,.json" style="display:none">
+<canvas id="canvas"></canvas>
+<div id="code-panel" class="hidden">
+  <div id="code-panel-header">
+    <span class="title">sourceCode</span>
+    <span class="hint">编辑后自动应用（debounce 400ms）</span>
+  </div>
+  <div id="code-panel-body"></div>
+  <div id="code-panel-error" class="hidden"></div>
+</div>
+<div id="panel" class="hidden">
+  <div id="panel-header">
+    <span id="panel-title">编辑</span>
+    <button id="panel-close">×</button>
+  </div>
+  <div id="panel-body"></div>
+</div>
+<div id="empty-hint" class="empty-hint"></div>
+<div id="tip" class="tip hidden"></div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,322 @@
+# System Analyzer
+
+> 给 AI 看的说明书。如果你是 AI 且读到这里，说明用户希望你能用这个工具。
+
+> **v0.6 架构（2026-06-16）：code-as-truth + GraphStarter 模型**
+>
+> 整张 graph = 一段 sourceCode 字符串（class 定义 + 启动代码）。AI 直接读写代码：
+>
+> ```js
+> class Processor {
+>   static description = "处理输入数据并传给下游"
+>   constructor() { this.speed = 100; this.next_stage = null }
+>   process({ dt }) { this.next_stage.input = this.speed * dt }
+> }
+>
+> const p1 = GraphStarter.add(Processor)
+> const p2 = GraphStarter.add(Processor)
+> const d1 = GraphStarter.add(Database)
+> p1.next_stage = d1
+> p2.speed = 200
+> GraphStarter.describe(p1, 'next_stage', '主数据流')
+> ```
+>
+> **核心规则：**
+> - 节点 = RuntimeInstance（varName 是身份，必须 `const <varName> = GraphStarter.add(ClassName)`）
+> - 多实例共享 class（同一个 class 可以 add 多次）
+> - 边由 class 方法体的 `this.<ref>.<attr> = ...` 派生（scanner 静态分析）
+> - 实例 override 写在启动段（`p1.speed = 200`），class 默认值永远保留
+> - 运行时 mutation（方法体里 `this.X = ...` 写 self）不入代码，reset 时丢弃
+> - URL 分享：编码 sourceCode（UTF-8 safe base64），上限 24000 字符
+>
+> 当前架构以 `CLAUDE.md` 和 `AGENTS.md` 为准。下方 v0.5 文本保留作历史参考。
+
+## 你的核心任务（v0.6）
+
+graph 的存储格式是 **一段 JS sourceCode**。你的核心工作：
+
+1. **读取 URL 里的 sourceCode**（base64 → JSON → `.sourceCode`）
+2. **识别空/stale 方法**（class 方法体为空 / `return null` / 与 `static description` 不符）
+3. **读懂 `static description`**，理解关系语义
+4. **修改 sourceCode**：在代码里实现方法体（保留 `static description` 不动）；或在启动段加 `GraphStarter.add(ClassName)` 增加实例
+5. **输出新 URL**（含更新后的 sourceCode）
+
+人写 `description` = 给你写需求文档；你填实现 = 按需求实现。
+
+## URL 编码（v0.6）
+
+```js
+function toB64(str) {
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
+    (_, p1) => String.fromCharCode(parseInt(p1, 16))))
+}
+// wrapper 格式：{version:3, sourceCode, visualState, graphId, title}
+const url = location.origin + location.pathname + '#' + toB64(JSON.stringify({
+  version: 3,
+  sourceCode: yourCode,
+  graphId: 'my_graph',
+  title: '我的图',
+}))
+```
+
+---
+
+# ⚠️ 下方内容为 v0.5 历史文档（instance-based + 静态扫描模型），已被 v0.6 取代
+
+下方描述的"class 库 bundle 内置 / state.instances 数组 / 点击实例化 / 没有 codeview"等机制
+在 v0.6 中全部反转：sourceCode 字符串现在是唯一真相源，codeview 重新引入，加实例必须
+在代码里写 `GraphStarter.add(ClassName)`。保留下方文本仅作历史参考。
+
+---
+
+## 这是什么
+
+System Analyzer 是一个 web 端的**系统关系可视化工具**。它能让用户（人或你）把一个复杂系统拆解成节点和关系，看清结构，甚至让系统"跑起来"做仿真。
+
+工具完全静态部署（GitHub Pages），打开一个 URL 即可使用，不需要安装、注册、配置。
+
+## 你的核心任务：读描述 → 填实现
+
+graph 的存储格式是 **JS Class**。每个节点的 code 是一段 class 代码，里面有：
+
+- **`static description`**：人写的自然语言描述（Level 1，"是什么"）
+- **方法体**：可执行的实现（Level 2，"怎么动"）
+
+**你的核心任务**：
+
+1. **读取 URL 里的 code**
+2. **识别空/stale 方法**（方法体为空/`return null`/与描述不符）
+3. **读懂 `static description`**，理解关系语义
+4. **在代码里实现方法体**，保留 `static description` 不动
+5. **输出新 URL**（含更新后的 code）
+
+人写 `description` = 给你写需求文档；你填实现 = 按需求实现。
+
+## 你该怎么用这个工具
+
+当用户聊到"某个系统是怎样运作的"、"帮我画个 X 的关系图"、"模拟一下 Y 的演化"这类需求时，你可以：
+
+1. **按下面 class 格式构造 graph**
+2. **编码到 URL hash**（UTF-8 safe base64）
+3. **输出 URL 给用户**，用户点开就能看到可视化
+
+用户也可以在 UI 上手动调整后**复制新 URL 回对话**——你 fetch 这个 URL，解码 hash，就能看到用户修改后的 code，按需重新填实现。
+
+## 数据格式（v0.7）
+
+每个节点的 code 是一个**类表达式，class 名即节点 label**。工具通过 JS 运行时反射提取元数据，**不解析源码字符串**：
+
+```json
+{
+  "graphs": [{
+    "id": "any-string",
+    "title": "显示在画布顶部的标题",
+    "nodes": [
+      {
+        "id": "population",
+        "label": "人口",
+        "code": "class 人口 {\n  static description = \"城市常住人口，受出生、死亡、移民影响\"\n  static inputs = [{\"id\":\"immigration\",\"label\":\"移民配额\"}]\n  static outputs = [{\"id\":\"housing_demand\",\"target\":\"housing\",\"target_port\":\"demand\"}]\n  current = 350\n  housing_demand(inputs) {\n    return this.current * 0.3\n  }\n}",
+        "metadata": {}
+      }
+    ]
+  }]
+}
+```
+
+### 字段说明
+
+**节点（node）字段**：
+- `id` (string, 必填)：唯一标识（不参与代码）
+- `label` (string, 必填)：显示名称，即 class 名
+- `code` (string, 必填)：`class 名称 { ... }` 源码
+- `metadata` (dict, 可选)：扩展元信息
+
+**`class 名称 { ... }` 内部结构**：
+- `static description` → 节点的 L1 自然语言描述（人的需求文档）
+- `static inputs` → 输入端口数组
+- `static outputs` → 输出端口数组（含 target/target_port 声明拓扑）
+- 实例属性 `name = value` → 节点状态（properties）
+- 同名方法 `outputPortId(inputs) { ... }` → 边的 L2 实现
+- `tick(dt, inputs) { ... }` → Level 3 时间演化
+
+**没有 edges 数组、没有 x/y**。
+
+### 运行时反射
+
+代码**不需要被源码解析**。工具通过 `new Function('return (class X {...})')()` 执行后直接读取 `cls.name`、`cls.inputs`、`new cls()` 的实例属性、`cls.prototype` 上的方法。方法体里的嵌套括号、分支、模板字面量——都是 JS 引擎自己的事。
+
+### 关于 class 名
+
+class 名即节点的显示 label，可以是中文。工具通过 `sanitizeIdentifier()` 处理空格/特殊字符。
+**class 名同时也是节点身份**——`node.id === sanitizeIdentifier(label) === class 名`，三者一一对应。这意味着两个节点的 sanitized label 不能重复（"人口" 和 "人口!" 会冲突，因为 sanitize 后都是 "人口"）。
+对于旧格式中带有 `static label` 的代码，导入时自动读取 `cls.label` 作为显示名（后向兼容）。
+
+### 向后兼容
+
+旧格式 `define(class X { ... })` 和 `class X { static inputs = [...] }` 在导入时自动迁移为新格式。
+老数据中 `node.id` 是 `n_X` 风格的自增 id（与 class 名不一致），加载时自动 remap 到 class 名，所有 `outputs[].target` 引用同步更新。
+
+## URL 编码
+
+把上面的 JSON 字符串做 **UTF-8 safe base64** 编码，作为 URL 的 hash：
+
+```
+https://<user>.github.io/<repo>/#<base64-encoded-json>
+```
+
+### JavaScript 编码
+
+```js
+function toB64(str) {
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
+    (_, p1) => String.fromCharCode(parseInt(p1, 16))))
+}
+```
+
+### Python 编码
+
+```python
+import urllib.parse, base64
+def to_b64(s: str) -> str:
+    percent = urllib.parse.quote(s, safe='')
+    raw = urllib.parse.unquote_to_bytes(percent)
+    return base64.b64encode(raw).decode('ascii')
+```
+
+## 反向同步
+
+用户在 UI 上调整后，点"分享"按钮得到一个新 URL。你可以：
+
+1. fetch 这个 URL（或直接读 hash 部分）
+2. 用反向解码（base64 → UTF-8）拿到 JSON
+3. 解析 JSON 看到用户修改后的最新状态
+
+```js
+function fromB64(b64) {
+  return decodeURIComponent(atob(b64).split('').map(c =>
+    '%' + c.charCodeAt(0).toString(16).padStart(2, '0')
+  ).join(''))
+}
+```
+
+## 三个 Level
+
+### Level 1：描述 only（最简单）
+
+code 只有 `static description` + 端口声明 + 空方法体（`return null`）。用户看到的是关系结构。
+
+```json
+{
+  "graphs": [{
+    "id": "team", "title": "团队协作",
+    "nodes": [
+      {
+        "id": "pm", "label": "产品经理",
+        "code": "class 产品经理 {\n  static description = \"定义需求，提交给开发\"\n  static outputs = [{\"id\":\"requirements\",\"target\":\"dev\",\"target_port\":\"input\"}]\n  requirements(inputs) {\n    return null\n  }\n}"
+      },
+      {
+        "id": "dev", "label": "开发",
+        "code": "class 开发 {\n  static description = \"实现功能，提交测试\"\n  static inputs = [{\"id\":\"input\",\"label\":\"需求\"}]\n  static outputs = [{\"id\":\"build\",\"target\":\"qa\",\"target_port\":\"test_case\"}]\n  build(inputs) {\n    return null\n  }\n}"
+      }
+    ]
+  }]
+}
+```
+
+### Level 2：描述 + 实现
+
+每个方法的方法体被填了。用户改一个值，沿关系传播。
+
+```json
+{
+  "graphs": [{
+    "id": "econ", "title": "简单经济模型",
+    "nodes": [
+      {
+        "id": "population", "label": "人口",
+        "code": "class 人口 {\n  static description = \"城市人口总量\"\n  static outputs = [{\"id\":\"housing_demand\",\"target\":\"housing\",\"target_port\":\"demand\"}]\n  current = 350\n  housing_demand(inputs) {\n    return this.current * 0.3\n  }\n}"
+      },
+      {
+        "id": "housing", "label": "住房",
+        "code": "class 住房 {\n  static description = \"住房供应与需求\"\n  static inputs = [{\"id\":\"demand\",\"label\":\"需求量\"}]\n  supply = 100\n}"
+      }
+    ]
+  }]
+}
+```
+
+### Level 3：加 tick（时间演化）
+
+在 Level 2 基础上加 `tick(dt, inputs)` 或其他被外部触发的方法。
+
+```json
+{
+  "graphs": [{
+    "id": "growth", "title": "人口增长模型",
+    "nodes": [
+      {
+        "id": "pop", "label": "人口",
+        "code": "class 人口 {\n  static description = \"人口随时间增长\"\n  current = 100\n  growthRate = 0.05\n  tick(dt, inputs) {\n    this.current += this.current * this.growthRate * dt\n  }\n}"
+      }
+    ]
+  }]
+}
+```
+
+## class 格式规范
+
+```js
+class 节点名称 {
+  static description = "节点的 L1 描述"
+  static inputs = [{"id":"...","label":"..."}]
+  static outputs = [{"id":"...","label":"...","target":"...","target_port":"..."}]
+
+  <propertyName> = <defaultValue>
+
+  <outputPortId>(inputs) {
+    return <计算逻辑>     // 边的 L2 实现
+  }
+
+  tick(dt, inputs) {
+    <状态演化逻辑>         // L3
+  }
+}
+```
+
+**同构映射**：
+- `class` 名 → 节点显示 label
+- `static description` → 节点的 L1 描述
+- `static inputs`/`outputs` → 端口（视觉用）
+- `outputs[].target`/`target_port` → 边的拓扑
+- output 同名方法 → 边的 L2 实现
+- `tick(dt, inputs)` → Level 3 时间演化
+
+**安全限制**：方法体里禁止 `import` / `require` / `fetch` / `XMLHttpRequest` / `eval`。
+
+## 限制
+
+- **URL hash 长度上限：16000 字符**（base64 编码后）。超过请提示用户用"导出 JSON 文件"。
+- 节点数量建议 < 50（更多会卡）。
+- 浏览器端执行（`new Function`），不能做重计算。
+
+## 建议工作流
+
+1. **判断 graph 当前在哪个 Level**：
+   - 方法体都是 `return null` 或空 → Level 1
+   - 方法体有实现 → Level 2
+   - 有 `tick` 或其他外部调用方法 → Level 3
+2. **识别空/stale 方法**：`description` 详细但方法体空 → 需要你填实现
+3. **填实现**：在方法体里写代码。**保留 `static description` 不动**。
+4. **判断需求类型**：用户想"看结构"（L1）、"看影响"（L2）、"看演化"（L3）？
+5. **构造 graph**：class 名即 label，用中文直接写。节点 id 用 ASCII（如 `pop`、`housing`）。
+6. **生成 URL**：JSON → UTF-8 safe base64 → URL hash。
+7. **输出 URL**：建议格式 `[System Analyzer 链接](url)`，让用户点开。
+8. **协作**：用户改完描述会复制新 URL 回来，你解码看新 `description`，重新填实现。
+
+## 不要做的
+
+- 不要把 API key 或敏感数据放在 graph 里（URL 是明文 base64，不是加密）。
+- 不要在 code 方法体里调用 `fetch`、`eval`、`import`——会被工具拒绝。
+- 不要修改 `static description`——你的任务是读它、填实现，描述是用户的需求文档。
+- 不要假设用户能跑 Level 3 仿真——需要用户在 UI 上点"下一步"或开启自动模式。
+- 不要在 JSON 里输出 `x, y`、`edges` 等字段——这些不在数据格式里。
