@@ -120,19 +120,13 @@ export function getPortPos(n,pid,dir){
   }
   return dir==='out'?{x:r.x+r.w,y}:{x:r.x,y}
 }
-// v0.9: 边的端点
-// - 矩形（medium/full）：左右水平出线 — 源右中点 → 目标左中点（电路图/流程图风格）
-// - 圆形（minimal）：沿两圆心连线，trimmed at perimeters（圆周交点）
-//   p1 = src + r·单位向量(tgt-src)，p2 = tgt - r·单位向量(tgt-src)
-//   这样箭头落在目标圆周上，永远可见；边沿径向出入，自然垂直于圆周
+// v0.9: 左右水平出线 — 源节点右侧中点出，目标节点左侧中点入（电路图/流程图风格）
+// 圆形节点用直径的最右/最左点；矩形节点用 right-mid / left-mid
 export function edgePts(src,tgt,e){
   const sr=getNodeRect(src),tr=getNodeRect(tgt)
   if(config.infoLevel==='minimal'){
     const sR=Math.max(sr.w,sr.h)/2,tR=Math.max(tr.w,tr.h)/2
-    const dx=tgt.x-src.x,dy=tgt.y-src.y
-    const d=Math.hypot(dx,dy)||1
-    const ux=dx/d,uy=dy/d
-    return{p1:{x:src.x+sR*ux,y:src.y+sR*uy},p2:{x:tgt.x-tR*ux,y:tgt.y-tR*uy}}
+    return{p1:{x:src.x+sR,y:src.y},p2:{x:tgt.x-tR,y:tgt.y}}
   }
   return{p1:{x:sr.x+sr.w,y:sr.y+sr.h/2},p2:{x:tr.x,y:tr.y+tr.h/2}}
 }
