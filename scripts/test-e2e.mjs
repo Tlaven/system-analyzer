@@ -101,9 +101,9 @@ console.log('测试 1：空画布加载')
     sourceCodeLength: window.state.sourceCode.length,
     editMode: window.state.editMode,
   }))
-  check('runtimeInstances 空', stats.instanceCount === 0, stats.instanceCount)
-  check('classes 空', stats.classCount === 0, stats.classCount)
-  check('sourceCode 空', stats.sourceCodeLength === 0, stats.sourceCodeLength)
+  check('默认示例 4 个实例', stats.instanceCount === 4, stats.instanceCount)
+  check('默认示例 4 个 class', stats.classCount === 4, stats.classCount)
+  check('默认示例 sourceCode 非空', stats.sourceCodeLength > 800, stats.sourceCodeLength)
   check('默认 editMode = ui', stats.editMode === 'ui', stats.editMode)
 }
 
@@ -289,7 +289,7 @@ console.log('\n测试 9：旧 v5 格式硬切换')
       try { return JSON.parse(raw).version === 5 } catch { return false }
     })(),
   }))
-  check('旧 v5 被忽略，runtimeInstances 空', result.instanceCount === 0, result.instanceCount)
+  check('旧 v5 被忽略，fallback 到默认示例', result.instanceCount === 4, result.instanceCount)
   check('旧 sa_data 被清空或覆盖', result.stillHasOld === false, result.stillHasOld)
 }
 
