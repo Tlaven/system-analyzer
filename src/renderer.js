@@ -139,7 +139,8 @@ export function render() {
     ctx.strokeStyle = ec; ctx.lineWidth = isSel ? 2.5 : isHighlighted ? 3.0 : 1.8
     if (isDimmed() && !isHighlighted) ctx.globalAlpha = DIM
     const es2 = config.edgeStyle
-    const isCurve = es2 === 'curve'
+    // 圆形（minimal）模式下 curve 降级为直线 — 圆心连线硬加曲线只会变形
+    const isCurve = es2 === 'curve' && config.infoLevel !== 'minimal'
 
     // 多边同对的 y 偏移：直线模式直接挪端点；曲线模式挪控制点
     const dyOff = idx * 12
@@ -210,11 +211,16 @@ export function render() {
   if (state.mode === 'edge' && state.tempEnd) {
     const s = state.nodes.find(n => n.id === state.edgeSrcId)
     if (s) {
-      // 拖边虚线：从源节点右侧中点出发（跟实际边的左右水平出线一致）
+      // 拖边虚线：从源节点边缘出发
       // 不走 edgePts —— state.tempEnd 是 {x,y} 不是节点，edgePts 内部 getNodeRect 会抛错
       const sr = getNodeRect(s)
       const p1 = config.infoLevel === 'minimal'
-        ? { x: s.x + Math.max(sr.w, sr.h) / 2, y: s.y }
+        ? (() => {
+            const sR = Math.max(sr.w, sr.h) / 2
+            const dx = state.tempEnd.x - s.x, dy = state.tempEnd.y - s.y
+            const d = Math.hypot(dx, dy) || 1
+            return { x: s.x + sR * dx / d, y: s.y + sR * dy / d }
+          })()
         : { x: sr.x + sr.w, y: sr.y + sr.h / 2 }
       ctx.beginPath(); ctx.setLineDash([6, 4])
       ctx.moveTo(p1.x, p1.y); ctx.lineTo(state.tempEnd.x, state.tempEnd.y)
