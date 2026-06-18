@@ -1,64 +1,56 @@
-// 静态扫描 class，识别属性 / 引用槽 / 写入声明（emitters）
+// v0.9 class field 扫描：description / name / attrs 三个实例级 class field
 //
-// 模型规约：
-//   - 节点信息 = class 的非下划线属性
-//   - 输出边来源 = class 方法体里 `this.<ref>.<attr> = ...` 形式的写入
-//   - 引用槽 = 被方法体写入过的属性（其值运行时指向另一实例）
+// 模型变更（vs v0.8）：
+//   - 删除 edges 字段扫描（edges 不再在 class 上声明，改为实例级 attrs.edges 数组）
+//   - 只扫 description / name / attrs 三个 class field
+//   - methods / hasTick 仍扫 prototype（Code 模式执行需要）
 //
-// 限制：本扫描器为正则实现，不识别字符串字面量内的模式。
-// class 库作者应避免在方法体的字符串字面量中出现 `this.X.Y =` 形式。
+// 限制：
+//   - 3 个 class field 必须是字面量写在 class body（无 static 前缀）
+//   - attrs 对象字面量：{ key: value, ... }（纯数据，无 null 引用槽）
 
-// 匹配 this.<ref>.<attr> 后跟赋值操作符
-// `=` 不能后跟 `=`（排除 `==`/`===`）
-// 同时支持复合赋值：+=、-=、*=、/=、%=、&=、|=、^=、<<=、>>=、>>>=
-const WRITE_RE = /this\.([a-zA-Z_$][\w$]*)\.([a-zA-Z_$][\w$]*)\s*(?:=(?!=)|[+\-*/%&|^]=|<<=|>>=?=)/g
-
-export function scanMethod(fn) {
-  if (typeof fn !== 'function') return []
-  const src = fn.toString()
-  const writes = []
-  WRITE_RE.lastIndex = 0
-  let m
-  while ((m = WRITE_RE.exec(src))) {
-    writes.push({ ref: m[1], attr: m[2] })
-  }
-  return writes
+function deepCopy(v) {
+  if (v === null || typeof v !== 'object') return v
+  return JSON.parse(JSON.stringify(v))
 }
 
-export function scanClass(cls) {
-  let defaults = {}
+export function scanClass(cls, _classSource) {
+  let fresh = {}
   try {
-    defaults = new cls()
+    fresh = new cls()
   } catch (e) {
     console.warn('[scanClass] 实例化失败', cls.name, e)
   }
 
-  const properties = Object.keys(defaults).filter(k => !k.startsWith('_'))
+  const description = typeof fresh.description === 'string' ? fresh.description : ''
+  const name = typeof fresh.name === 'string' ? fresh.name : ''
 
-  const emitters = []
+  const rawAttrs = (fresh.attrs && typeof fresh.attrs === 'object' && !Array.isArray(fresh.attrs))
+    ? fresh.attrs
+    : {}
+  // 过滤掉 edges 键（v0.9：edges 是实例级运行时字段，不应在 class attrs 默认里）
+  const attrsClean = {}
+  for (const k of Object.keys(rawAttrs)) {
+    if (k === 'edges') continue
+    attrsClean[k] = rawAttrs[k]
+  }
+  const attrs = deepCopy(attrsClean)
+
   const methods = []
   let hasTick = false
-
-  for (const name of Object.getOwnPropertyNames(cls.prototype)) {
-    if (name === 'constructor') continue
-    const fn = cls.prototype[name]
+  for (const methodName of Object.getOwnPropertyNames(cls.prototype)) {
+    if (methodName === 'constructor') continue
+    const fn = cls.prototype[methodName]
     if (typeof fn !== 'function') continue
-    methods.push(name)
-    if (name === 'tick') hasTick = true
-    const writes = scanMethod(fn)
-    for (const w of writes) {
-      emitters.push({ method: name, ref: w.ref, attr: w.attr })
-    }
+    methods.push(methodName)
+    if (methodName === 'tick') hasTick = true
   }
 
-  const references = [...new Set(emitters.map(e => e.ref))]
-
   return {
-    properties,   // string[] — 所有非下划线属性名（即节点信息字段）
-    references,   // string[] — 引用槽属性名（被方法体写入过）
-    emitters,     // { method, ref, attr }[] — 所有写入声明
-    methods,      // string[] — 所有方法名（执行用）
-    hasTick,      // boolean — 是否有 tick 方法（时间演化）
-    defaults,     // object — new cls() 的默认实例（用于创建实例时拷贝默认值）
+    description,   // string — class 默认描述
+    name,          // string — class 默认名（空表示用 className 回退）
+    attrs,         // { key: value } — class 默认属性字典（纯数据）
+    methods,       // string[] — 所有方法名（Code 模式执行用）
+    hasTick,       // boolean — 是否有 tick 方法
   }
 }

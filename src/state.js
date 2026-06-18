@@ -113,23 +113,23 @@ export function getPaletteColors() {
 
 // Style config (mutable, persisted)
 export const config = {
-  layout: 'manual', edgeStyle: 'straight', nodeShape: 'rounded',
+  layout: 'manual', edgeStyle: 'straight',
   infoLevel: 'minimal', positionMode: 'manual', edgeAnim: 'none',
   brightness: 0, palette: 'classic',
   execMode: 'off',
 }
 
-// ============ v0.6 code-as-truth state ============
-// 模型变更：
-//   - sourceCode 是唯一真相源（class 定义 + 启动代码同一段字符串）
-//   - runtimeInstances 是派生（执行 sourceCode 得到）
-//   - classes 是派生（parser + scanClass）
-//   - visualState 存不入代码的视图信息（位置、颜色）
-//   - 实例身份 = varName（启动代码里的变量名）
+// ============ v0.7 dual-mode state ============
+// 模型变更（vs v0.6）：
+//   - 双模式：editMode 'ui' | 'code'，决定 panel/codeview 谁可编辑
+//   - panelMode 是 UI 临时状态（varName -> 'class' | 'instance'），不入 sourceCode
+//   - sourceCode 仍是唯一真相源；UI 模式 serializeCode 双向同步；Code 模式 panel 只读
+//   - 边模型从 emitter 改为 class 的 static edges 容器
+//   - varName 由 GraphStarter.add() 内部自动生成（不再正则扫字面 const）
 import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
 
 export const state = {
-  // v0.6 核心
+  // v0.7 核心
   sourceCode: DEFAULT_BOOTSTRAP,
   runtimeInstances: [],
   classes: {},
@@ -138,6 +138,10 @@ export const state = {
     colors: {},        // varName -> color string
   },
 
+  // v0.7 双模式
+  editMode: 'ui',            // 'ui' | 'code'
+  panelMode: {},             // { [varName]: 'class' | 'instance' } — UI 临时状态
+
   // 视图（保留为顶层，方便访问）
   viewX: 0, viewY: 0, viewScale: 1,
 
@@ -145,11 +149,17 @@ export const state = {
   selVarName: null,
   selEdge: null,
   hoverVarName: null,
+  hoverEdge: null,
   dragVarName: null,
+
+  // 剪贴板（存 varName 字符串，Ctrl+C/V 用）
+  clipboard: null,
 
   // 交互状态
   mode: null,
   isDown: false, sX: 0, sY: 0, moved: false,
+  edgeSrcId: null,    // 拖边起点 varName（state.mode === 'edge' 时）
+  tempEnd: null,      // 拖边虚线终点（世界坐标）
 
   // 图元数据
   graphId: 'g_' + Date.now(), graphTitle: '系统模型',

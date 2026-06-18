@@ -1,45 +1,56 @@
+// 产品研发流水线（Code 模式）：PM → Design → Dev → QA → Release。
+// v0.9 边在实例级 attrs.edges，每条 { target, description }。
+
 class PM {
-  static description = "产品经理：定义需求，对齐目标和优先级"
-  constructor() { this.requirements = ''; this.next = null }
-  process({ dt }) { this.next.input = this.requirements }
+  description = "产品经理：定义需求，对齐目标和优先级"
+  name = "PM"
+  attrs = { requirements: '' }
+  process({ dt }) {
+    for (const e of this.edges || []) e.target.input = this.requirements
+  }
 }
 
 class Design {
-  static description = "设计师：产出设计稿和原型"
-  constructor() { this.input = ''; this.next = null }
-  process({ dt }) { this.next.input = this.input + ' + 设计稿' }
+  description = "设计师：产出设计稿和原型"
+  name = "设计"
+  attrs = { input: '' }
+  process({ dt }) {
+    for (const e of this.edges || []) e.target.input = this.input + ' + 设计稿'
+  }
 }
 
 class Dev {
-  static description = "开发：实现功能"
-  constructor() { this.input = ''; this.next = null }
-  process({ dt }) { this.next.input = this.input + ' + 实现' }
+  description = "开发：实现功能"
+  name = "开发"
+  attrs = { input: '' }
+  process({ dt }) {
+    for (const e of this.edges || []) e.target.input = this.input + ' + 实现'
+  }
 }
 
 class QA {
-  static description = "测试：验证质量"
-  constructor() { this.input = ''; this.next = null }
-  process({ dt }) { this.next.input = this.input + ' + 验证通过' }
+  description = "测试：验证质量"
+  name = "QA"
+  attrs = { input: '' }
+  process({ dt }) {
+    for (const e of this.edges || []) e.target.input = this.input + ' + 验证通过'
+  }
 }
 
 class Release {
-  static description = "上线：用户用上新功能"
-  constructor() { this.input = '' }
+  description = "上线：用户用上新功能"
+  name = "上线"
+  attrs = { input: '' }
 }
 
-const pm = GraphStarter.add(PM)
-const design = GraphStarter.add(Design)
-const dev = GraphStarter.add(Dev)
-const qa = GraphStarter.add(QA)
-const release = GraphStarter.add(Release)
+const PM_1 = GraphStarter.add(PM)
+const Design_1 = GraphStarter.add(Design)
+const Dev_1 = GraphStarter.add(Dev)
+const QA_1 = GraphStarter.add(QA)
+const Release_1 = GraphStarter.add(Release)
 
-pm.requirements = '需求 A'
-pm.next = design
-design.next = dev
-dev.next = qa
-qa.next = release
-
-GraphStarter.describe(pm, 'next', '提需求 + 设计要求')
-GraphStarter.describe(design, 'next', '交付设计稿')
-GraphStarter.describe(dev, 'next', '提交测试')
-GraphStarter.describe(qa, 'next', '验收通过')
+PM_1.requirements = '需求 A'
+PM_1.edges = [{ target: Design_1, description: '提需求 + 设计要求' }]
+Design_1.edges = [{ target: Dev_1, description: '交付设计稿' }]
+Dev_1.edges = [{ target: QA_1, description: '提交测试' }]
+QA_1.edges = [{ target: Release_1, description: '验收通过' }]

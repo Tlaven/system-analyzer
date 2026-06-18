@@ -91,6 +91,23 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
 #code-panel-body .cm-scroller{overflow:auto}
 #code-panel-error{padding:6px 14px;font-size:12px;color:#e53935;background:#fff5f5;border-top:1px solid #e53935;font-family:'Cascadia Code','Fira Code','Consolas',monospace}
 #code-panel-error.hidden{display:none}
+/* v0.7 双模式 segmented control */
+.edit-mode-group{display:inline-flex;border:1px solid var(--tbtnb);border-radius:5px;overflow:hidden;background:var(--tbtn)}
+.edit-mode-btn{padding:4px 12px;border:none;background:transparent;cursor:pointer;font-size:12px;font-family:inherit;color:var(--tbtnc);transition:background .15s;border-right:1px solid var(--tbtnb)}
+.edit-mode-btn:last-child{border-right:none}
+.edit-mode-btn:hover{background:var(--tbtn-hbg);color:var(--tbtn-hc)}
+.edit-mode-btn.active{background:var(--tbtn-hbg);color:var(--tbtn-hc);font-weight:600}
+/* v0.7 Phase 2: 新建节点按钮 / 复制按钮 */
+#add-node-btn{padding:4px 11px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:16px;line-height:1;font-family:inherit;color:var(--tbtnc)}
+#add-node-btn:hover:not(:disabled){background:var(--tbtn-hbg);border-color:var(--tbtn-hb);color:var(--tbtn-hc)}
+#add-node-btn:disabled{cursor:not-allowed;opacity:.4}
+.btn-copy{width:100%;padding:8px;background:var(--tbtn);border:1px solid var(--tbtnb);color:var(--tbtn-hc);border-radius:5px;cursor:pointer;font-size:13px;font-family:inherit;margin-bottom:6px;transition:background .15s}
+.btn-copy:hover{background:var(--tbtn-hbg);border-color:var(--tbtn-hb)}
+/* v0.7 Phase 3: panel segmented control + warning bar */
+.panel-mode-toggle{display:flex;width:100%;box-sizing:border-box}
+.panel-mode-toggle .edit-mode-btn{flex:1;text-align:center}
+.panel-warn{padding:6px 10px;margin:6px 0 10px;background:#fff8e1;border:1px solid #ffcc80;border-radius:5px;color:#bf360c;font-size:12px;line-height:1.5}
+.dark .panel-warn{background:#3a2a1a;border-color:#6d4c41;color:#ff8a65}
 </style>
 </head>
 <body>
@@ -101,9 +118,9 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
     <div class="dropdown-menu" data-menu="file">
       <div class="menu-item" onclick="onNew()">新建</div>
       <div class="menu-sep"></div>
-      <div class="menu-item" onclick="document.getElementById('import-input').click()">导入 JSON</div>
+      <div class="menu-item" onclick="document.getElementById('import-input').click()">导入 JavaScript</div>
       <div class="menu-sep"></div>
-      <div class="menu-item" onclick="onExport()">导出 JSON</div>
+      <div class="menu-item" onclick="onExport()">导出 JavaScript</div>
       <div class="menu-item" onclick="shareURL()">分享</div>
     </div>
   </div>
@@ -126,9 +143,6 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
       <div class="menu-label">内容</div>
       <div class="menu-row"><span>信息密度</span><select id="sel-info" onchange="onStyleChange('infoLevel',this.value)">
         <option value="minimal">极简</option><option value="medium">卡片</option><option value="full">完整</option>
-      </select></div>
-      <div class="menu-row menu-child"><span>节点形状</span><select id="sel-shape" onchange="onStyleChange('nodeShape',this.value)">
-        <option value="rounded">圆角矩形</option><option value="circle">圆形</option><option value="capsule">胶囊</option>
       </select></div>
       <div class="menu-sep"></div>
       <div class="menu-label">连线</div>
@@ -155,6 +169,11 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
   <span id="zoom-display" onclick="resetZoom()" style="cursor:pointer;font-size:12px;color:var(--ttext);min-width:40px;text-align:center" title="点击重置为 100%">100%</span>
   <button id="step-btn" onclick="stepOnce()" style="display:none;padding:4px 10px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;color:var(--tbtnc)">▶ 下一步</button>
   <div class="sep"></div>
+  <div class="edit-mode-group" title="切换编辑模式（UI 编辑 ↔ 代码）">
+    <button class="edit-mode-btn active" data-mode="ui" onclick="setEditMode('ui')">UI 编辑</button>
+    <button class="edit-mode-btn" data-mode="code" onclick="setEditMode('code')">代码</button>
+  </div>
+  <button id="add-node-btn" onclick="createNode()" title="新建节点（UI 模式，或双击画布空白）">+</button>
   <button onclick="toggleCodeView()" title="代码编辑器" style="padding:4px 11px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:13px;font-family:'Cascadia Code','Consolas',monospace;color:var(--tbtnc)">&lt;/&gt;</button>
   <button onclick="resetRuntime()" title="重置运行时（丢弃方法体 mutation，回到 sourceCode 初始）" style="padding:4px 11px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit;color:var(--tbtnc)">↻</button>
   <div class="sep"></div>

@@ -5,6 +5,27 @@ import { pushUndo } from './editor.js'
 import { saveConfig } from './config.js'
 import { deriveEdges } from './io.js'
 
+// 给没有位置的实例分配网格位置（导入新图 / 首次启动时调用）
+export function spreadUnpositioned() {
+  const unpositioned = state.runtimeInstances.filter(inst =>
+    !state.visualState.positions[inst.varName]
+  )
+  if (!unpositioned.length) return
+  const cw = window.innerWidth, ch = window.innerHeight
+  const n = unpositioned.length
+  const cols = Math.ceil(Math.sqrt(n))
+  const rows = Math.ceil(n / cols)
+  const spX = 240, spY = 110
+  unpositioned.forEach((inst, i) => {
+    const col = i % cols
+    const row = Math.floor(i / cols)
+    state.visualState.positions[inst.varName] = {
+      x: cw / 2 + (col - (cols - 1) / 2) * spX,
+      y: ch / 2 + (row - (rows - 1) / 2) * spY,
+    }
+  })
+}
+
 export function fitToView() {
   if(!state.nodes.length){state.viewX=0;state.viewY=0;state.viewScale=1;render();return}
   let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity

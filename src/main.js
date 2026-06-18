@@ -3,7 +3,7 @@ import { render } from './renderer.js'
 import { load, save, importSource, wrapInstance } from './io.js'
 import { runSource } from './codegraph.js'
 import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
-import { fitToView } from './physics.js'
+import { fitToView, spreadUnpositioned } from './physics.js'
 import { loadConfig, applyTheme } from './config.js'
 import { initInput } from './input.js'
 import { fromB64 } from './utils.js'
@@ -51,6 +51,7 @@ function init() {
     if (titleEl) titleEl.textContent = state.graphTitle
   }
 
+  spreadUnpositioned()
   fitToView()
   initInput()
   mountCodeView()

@@ -1,18 +1,20 @@
 # 通用系统辅助分析平台 — 设计文档
 
-> **历史文档（pre-v0.5），仅作设计思路参考。当前实际架构见 `CLAUDE.md` / `AGENTS.md`。**
+> **v0.4-era 历史文档，已被 v0.7 取代。** 仅作设计思路参考。
+>
+> 当前实际架构见 `CLAUDE.md` / `AGENTS.md`。v0.7 设计意图见 `docs/v0.7-design.md`。
 >
 > 版本路线：
 > - **v0.4 及更早**：class-based + code-as-truth（本文档描述的模型）
 > - **v0.5**：instance-based + 静态扫描（class 库 bundle 内置，删除 codeview）
-> - **v0.6（当前）**：回归 code-as-truth，但用 `GraphStarter.add(ClassName)` 启动代码支持多实例
+> - **v0.6**：回归 code-as-truth，emitter-based 边模型
+> - **v0.7（当前）**：双模式编辑（UI / Code）+ static edges 容器模型；删除 emitter、GraphStarter.describe、字面 const varName 扫描
 >
-> v0.6 的代码层哲学与本文档的 "L1 注释 + L2 实现统一在 code 里" 一致，
-> 但实施细节（启动代码、`describe()` API、双向转换器）以 `CLAUDE.md` 为准。
+> 本文档的"L1 注释 + L2 实现统一在 code 里"哲学在 v0.7 仍成立，
+> 但实施细节（启动代码、static edges 容器、双模式切换、panel 类型/实例切换）
+> 以 `CLAUDE.md` 为准。
 >
-> 日期：2026-06-14（v0.6 note: 2026-06-16）
-
-详见 `docs/level-design.md` v0.2。
+> 日期：2026-06-14（v0.7 note: 2026-06-17）
 
 ---
 

@@ -48,7 +48,8 @@ export function selectInstance(inst) {
 
 export function selectEdge(e) {
   deselectAll()
-  state.selEdge = e
+  // v0.7 Phase 5: 存 id 字符串而非对象引用，活过 runSource 重建
+  state.selEdge = e ? e.id : null
   render()
 }
 
@@ -66,10 +67,10 @@ export function delInstance(inst) {
   // 清理其他实例指向被删实例的引用（身份比较）
   for (const other of state.runtimeInstances) {
     const cls = state.classes[other.className]
-    if (!cls) continue
-    for (const ref of cls.references) {
-      if (other.attrs[ref] === inst.attrs) {
-        other.attrs[ref] = null
+    if (!cls || !cls.edges) continue
+    for (const edge of cls.edges) {
+      if (other.attrs[edge.name] === inst.attrs) {
+        other.attrs[edge.name] = null
       }
     }
   }
@@ -80,16 +81,16 @@ export function delInstance(inst) {
   syncCodeFromRuntime(); render()
 }
 
-// 删除边 = 清空源实例的引用槽（让 emitter 不再产出此边）+ 清 edgeMeta
+// v0.7: 删除边 = 清空源实例的引用槽（让 ref 不再指向目标，边自然消失）
 export function delEdge(e) {
   if (!e) return
   pushUndo()
   const src = state.runtimeInstances.find(i => i.varName === e.source_instance)
   if (src) {
     src.attrs[e.source_ref] = null
-    if (src.edgeMeta) delete src.edgeMeta[e.source_ref]
   }
-  if (state.selEdge === e) deselectAll()
+  // v0.7 Phase 5: selEdge 现在存 id 字符串
+  if (state.selEdge === e.id) deselectAll()
   syncCodeFromRuntime(); render()
 }
 

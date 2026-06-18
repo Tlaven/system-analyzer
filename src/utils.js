@@ -1,48 +1,104 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, PORT_R, PORT_HIT, EDGE_HIT, isDark } from './state.js'
 import { deriveEdges } from './io.js'
 
-export function getNodeH(n,estW){
-  const lv=config.infoLevel
-  if(lv==='minimal')return 36
-  const pk=Object.keys(n.properties)
-  if(lv==='medium'){
-    if(!pk.length)return 36
-    let h=26
-    h+=Math.min(pk.length,4)*17
-    return h+8
-  }
-  if(!pk.length)return 36
-  let h=26
-  h+=Math.min(pk.length,4)*17
-  return h+8
+// minimal 模式 → 圆形几何；medium/full → 圆角矩形
+function isCircleMode() {
+  return config.infoLevel === 'minimal'
 }
+
+// 把任意属性值格式化为画布上的简短字符串（消除 [object Object]、数字超长）
+export function formatScalar(v) {
+  if (v === null) return 'null'
+  if (v === undefined) return ''
+  if (typeof v === 'number') {
+    if (!isFinite(v)) return v > 0 ? '∞' : '-∞'
+    const abs = Math.abs(v)
+    if (abs !== 0 && (abs >= 1e7 || abs < 1e-4)) return v.toExponential(2)
+    if (!Number.isInteger(v)) return v.toFixed(2)
+    if (abs >= 1e12) return v.toExponential(2)
+    return String(v)
+  }
+  if (typeof v === 'function') return 'ƒ'
+  if (Array.isArray(v)) return '[' + v.length + ']'
+  if (typeof v === 'object') {
+    const keys = Object.keys(v)
+    return keys.length ? '{…}' : '{}'
+  }
+  return String(v)
+}
+
+let _measureCtx = null
+function measureCtx() {
+  if (!_measureCtx) _measureCtx = document.createElement('canvas').getContext('2d')
+  return _measureCtx
+}
+function measureText(text, font) {
+  const ctx = measureCtx()
+  ctx.font = font
+  return ctx.measureText(text == null ? '' : text).width
+}
+
+// minimal 圆形半径：文字宽度自适应，封顶 40，下限 22
+export function getNodeRadius(n) {
+  const label = n.label || ''
+  const w = measureText(label, '14px "Microsoft YaHei",sans-serif')
+  return Math.min(40, Math.max(22, w / 2 + 8))
+}
+
+export function getNodeH(n, estW) {
+  if (isCircleMode()) {
+    return getNodeRadius(n) * 2
+  }
+  const pk = Object.keys(n.properties)
+  const maxRows = config.infoLevel === 'full' ? 6 : 4
+  const shown = Math.min(pk.length, maxRows)
+  const overflowRow = pk.length > maxRows ? 1 : 0
+  let h = 36
+  if (config.infoLevel === 'full') h += 17
+  h += shown * 17
+  h += overflowRow * 17
+  if (config.infoLevel === 'full') {
+    if (n.description) h += 17
+  }
+  return h + 12
+}
+
 export function getNodeRect(n) {
-  const ctx=document.createElement('canvas').getContext('2d'),lv=config.infoLevel
-  ctx.font='14px "Microsoft YaHei",sans-serif'
-  let cw=ctx.measureText(n.label).width
-  if(lv==='medium'||lv==='full'){
-    ctx.font='11px "Microsoft YaHei",sans-serif'
-    for(const k of Object.keys(n.properties).slice(0,4)){
-      const rw=ctx.measureText(k+'  '+String(n.properties[k])).width
-      if(rw>cw)cw=rw
+  if (isCircleMode()) {
+    const r = getNodeRadius(n)
+    return { x: n.x - r, y: n.y - r, w: r * 2, h: r * 2 }
+  }
+  const label = n.label || ''
+  let cw = measureText(label, 'bold 13px "Microsoft YaHei",sans-serif')
+  if (config.infoLevel === 'full') {
+    const subW = measureText(n.varName, '11px "Microsoft YaHei",sans-serif')
+    if (subW > cw) cw = subW
+  }
+  const pk = Object.keys(n.properties)
+  const maxRows = config.infoLevel === 'full' ? 6 : 4
+  for (const k of pk.slice(0, maxRows)) {
+    const v = formatScalar(n.properties[k])
+    const rowW = measureText(k + '  ' + v, '11px "Microsoft YaHei",sans-serif')
+    if (rowW > cw) cw = rowW
+  }
+  if (config.infoLevel === 'full') {
+    if (n.description) {
+      const descW = measureText(n.description, '11px "Microsoft YaHei",sans-serif')
+      if (descW > cw) cw = descW
     }
   }
-  let extra=0
-  if(lv==='full'){
-    ctx.font='10px "Microsoft YaHei",sans-serif'
-    let mIW=0,mOW=0
-    for(const p of n.inputs){const pw=ctx.measureText(p.label||p.id).width;if(pw>mIW)mIW=pw}
-    for(const p of n.outputs){const pw=ctx.measureText(p.label||p.id).width;if(pw>mOW)mOW=pw}
-    extra=mIW+mOW+24
-  }
-  const w=Math.max(NODE_MIN_W,Math.min(480,cw+NODE_PAD*2+extra))
-  const h=getNodeH(n,w)
-  return{x:n.x-w/2,y:n.y-h/2,w,h}
+  const dpr = window.devicePixelRatio || 1
+  const canvas = document.getElementById('canvas')
+  const viewportW = canvas ? (canvas.width / dpr / state.viewScale) : 800
+  const maxW = Math.min(viewportW * 0.4, 600)
+  const w = Math.max(NODE_MIN_W, Math.min(maxW, cw + NODE_PAD * 2))
+  const h = getNodeH(n, w)
+  return { x: n.x - w / 2, y: n.y - h / 2, w, h }
 }
 export function rectEdge(r,tx,ty){
   const cx=r.x+r.w/2,cy=r.y+r.h/2,dx=tx-cx,dy=ty-cy
   if(dx===0&&dy===0)return{x:cx,y:cy}
-  if(config.nodeShape==='circle'){
+  if(config.infoLevel==='minimal'){
     const rad=Math.max(r.w,r.h)/2,ang=Math.atan2(dy,dx)
     return{x:cx+rad*Math.cos(ang),y:cy+rad*Math.sin(ang)}
   }
@@ -52,10 +108,11 @@ export function rectEdge(r,tx,ty){
   return{x:cx+dx*sc,y:cy+dy*sc}
 }
 export function getPortPos(n,pid,dir){
+  if(config.infoLevel==='minimal') return null
   const r=getNodeRect(n),arr=dir==='out'?n.outputs:n.inputs,idx=arr.findIndex(p=>p.id===pid)
   if(idx<0)return null
   const y=r.y+r.h*(idx+1)/(arr.length+1)
-  if(config.nodeShape==='circle'){
+  if(config.infoLevel==='minimal'){
     const rad=Math.max(r.w,r.h)/2,cy=r.y+r.h/2,dy=y-cy
     if(Math.abs(dy)>=rad)return dir==='out'?{x:r.x+r.w,y}:{x:r.x,y}
     const hdx=Math.sqrt(rad*rad-dy*dy)
@@ -63,10 +120,34 @@ export function getPortPos(n,pid,dir){
   }
   return dir==='out'?{x:r.x+r.w,y}:{x:r.x,y}
 }
+// v0.9: 左右水平出线 — 源节点右侧中点出，目标节点左侧中点入（电路图/流程图风格）
+// 圆形节点用直径的最右/最左点；矩形节点用 right-mid / left-mid
 export function edgePts(src,tgt,e){
-  if(e&&e.source_port){const p=getPortPos(src,e.source_port,'out');if(p)return{p1:p,p2:getPortPos(tgt,e.target_port,'in')||rectEdge(getNodeRect(tgt),src.x,src.y)}}
-  if(e&&e.target_port){const p=getPortPos(tgt,e.target_port,'in');if(p)return{p1:rectEdge(getNodeRect(src),tgt.x,tgt.y),p2:p}}
-  return{p1:rectEdge(getNodeRect(src),tgt.x,tgt.y),p2:rectEdge(getNodeRect(tgt),src.x,src.y)}
+  const sr=getNodeRect(src),tr=getNodeRect(tgt)
+  if(config.infoLevel==='minimal'){
+    const sR=Math.max(sr.w,sr.h)/2,tR=Math.max(tr.w,tr.h)/2
+    return{p1:{x:src.x+sR,y:src.y},p2:{x:tgt.x-tR,y:tgt.y}}
+  }
+  return{p1:{x:sr.x+sr.w,y:sr.y+sr.h/2},p2:{x:tr.x,y:tr.y+tr.h/2}}
+}
+// 拖柄位置：选中节点的 4 个边缘中点（上/右/下/左）
+export function getHandlePoints(n){
+  const r=getNodeRect(n)
+  if(config.infoLevel==='minimal'){
+    const rad=Math.max(r.w,r.h)/2
+    return[
+      {x:n.x,y:n.y-rad},
+      {x:n.x+rad,y:n.y},
+      {x:n.x,y:n.y+rad},
+      {x:n.x-rad,y:n.y},
+    ]
+  }
+  return[
+    {x:r.x+r.w/2,y:r.y},
+    {x:r.x+r.w,y:r.y+r.h/2},
+    {x:r.x+r.w/2,y:r.y+r.h},
+    {x:r.x,y:r.y+r.h/2},
+  ]
 }
 export function distSeg(px,py,x1,y1,x2,y2){
   const dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy
@@ -123,6 +204,21 @@ export function truncateText(ctx,text,maxW){
   return text+'…'
 }
 export function esc(s){if(s===null||s===void 0)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+
+// v0.7 Phase 2: JS 标识符合法性（class 名 + varName 共用）
+export function isValidIdentifier(s) {
+  return typeof s === 'string' && /^[A-Za-z_$][\w$]*$/.test(s)
+}
+
+// v0.7 Phase 2: 给定 base 名，扫 state.runtimeInstances 已用 varName，返回不冲突的 base 或 base_2、base_3...
+// 若 base 本身没冲突，直接返回；否则尝试 base_2, base_3, ... 直到找到空位
+export function suggestUniqueVarName(base) {
+  const used = new Set(state.runtimeInstances.map(i => i.varName))
+  if (!used.has(base)) return base
+  let n = 2
+  while (used.has(base + '_' + n)) n++
+  return base + '_' + n
+}
 export function toB64(str){
   try{return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,(_,p1)=>String.fromCharCode(parseInt(p1,16))))}catch(e){return''}
 }
@@ -132,8 +228,20 @@ export function fromB64(b64){
 export function hitNode(x, y) {
   for (let i = state.nodes.length - 1; i >= 0; i--) {
     const n = state.nodes[i], r = getNodeRect(n)
-    if (config.nodeShape === 'circle') { const rad = Math.max(r.w, r.h) / 2; if (Math.hypot(x - n.x, y - n.y) < rad) return n }
+    if (config.infoLevel === 'minimal') { const rad = Math.max(r.w, r.h) / 2; if (Math.hypot(x - n.x, y - n.y) < rad) return n }
     else if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return n
+  }
+  return null
+}
+
+// 拖柄 hit（仅 selNode）：检测选中节点的 4 个边缘中点圆点是否被点中
+// 返回命中拖柄时返回 selNode；未命中返回 null
+export function hitHandle(x, y) {
+  const sel = state.selInstance
+  if (!sel) return null
+  const handles = getHandlePoints(sel)
+  for (const h of handles) {
+    if (Math.hypot(x - h.x, y - h.y) < PORT_HIT) return sel
   }
   return null
 }

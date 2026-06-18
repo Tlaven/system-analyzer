@@ -1,44 +1,56 @@
-// v0.6 核心引擎：sourceCode ↔ runtimeInstances 双向转换
+// v0.9 核心引擎：sourceCode ↔ runtimeInstances 双向转换
+//
+// 模型变更（vs v0.8）：
+//   - 3 个实例级 class field：description / name / attrs（无 static 前缀）
+//   - 删除 class.edges：边不在 class 声明，改为实例级 attrs.edges 数组
+//   - 每条边：{ target, description }，target 是另一 inst.attrs，description 按需追加
+//   - 一个实例可以有多个 edges（多对一、多对多都支持）
+//   - state.classes 字段：description / name / attrs / methods / hasTick / cls
 //
 // 数据流：
 //   sourceCode --runSource--> runtimeInstances + classes
-//   runtimeInstances --serializeCode--> sourceCode
+//   runtimeInstances --serializeCode--> sourceCode（仅 UI 模式调）
 //   resetRuntime = runSource(state.sourceCode)
 
 import { splitSource } from './parser.js'
 import { scanClass } from './scanner.js'
 
-const VAR_DECL_RE = /(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*=\s*GraphStarter\.add\s*\(/g
-
-// 创建 GraphStarter bridge。add() 返回 attrs（含不可枚举 __instId 反查），
-// 这样 bootstrap 里 `p1.next_stage = d1` 原生赋值在 attrs 层生效，
-// 方法体 `this.X.Y = ...` 无需 proxy 直接命中目标 attrs。
+// 创建 GraphStarter bridge。add(cls, explicitName) 内部自动生成 varName `<ClassName>_<n>`，
+// 或使用 explicitName。返回 attrs（含不可枚举 __instId 反查），
+// 这样 bootstrap 里 `Source_1.edges = [{ target: Database_1, ... }]` 原生赋值在 attrs 层生效。
 function makeBridge() {
   const instances = []
-  const describes = []
+  const counters = {}
 
   return {
     _instances: instances,
-    _describes: describes,
 
-    add(cls) {
+    add(cls, explicitName) {
       if (typeof cls !== 'function') {
         throw new Error('GraphStarter.add 需要 class 构造器，得到: ' + typeof cls)
       }
       const fresh = new cls()
-      const attrs = {}
-      for (const k of Object.keys(fresh)) {
-        if (k.startsWith('_')) continue
-        const v = fresh[k]
-        attrs[k] = (v !== null && typeof v === 'object')
-          ? JSON.parse(JSON.stringify(v))
-          : v
+      const rawAttrs = (fresh.attrs && typeof fresh.attrs === 'object' && !Array.isArray(fresh.attrs))
+        ? fresh.attrs
+        : {}
+      // 过滤 edges 键（class 定义里若误写了 edges，实例化时丢弃；edges 由启动段动态追加）
+      const attrsInit = {}
+      for (const k of Object.keys(rawAttrs)) {
+        if (k === 'edges') continue
+        attrsInit[k] = rawAttrs[k]
+      }
+      const attrs = JSON.parse(JSON.stringify(attrsInit))
+      let varName
+      if (explicitName && typeof explicitName === 'string') {
+        varName = explicitName
+      } else {
+        counters[cls.name] = (counters[cls.name] || 0) + 1
+        varName = cls.name + '_' + counters[cls.name]
       }
       const inst = {
-        varName: null,
+        varName,
         className: cls.name,
         attrs,
-        edgeMeta: {},
         _topoError: null,
         _execError: null,
       }
@@ -50,13 +62,6 @@ function makeBridge() {
       })
       instances.push(inst)
       return attrs
-    },
-
-    describe(srcAttrs, refName, text, opts = {}) {
-      if (!srcAttrs || typeof srcAttrs !== 'object') return
-      const inst = srcAttrs.__instId
-      if (!inst) return
-      inst.edgeMeta[refName] = { description: text, ...opts }
     },
   }
 }
@@ -76,30 +81,21 @@ export function runSource(sourceCode, state) {
     } catch (e) {
       throw new Error(`class ${c.name} 解析失败: ${e.message}`)
     }
-    const scan = scanClass(cls)
+    const scan = scanClass(cls, c.source)
     state.classes[c.name] = {
       id: c.name,
       cls,
       label: c.name,
-      description: cls.description || '',
-      properties: scan.properties,
-      references: scan.references,
-      emitters: scan.emitters,
+      description: scan.description,
+      name: scan.name,
+      attrs: scan.attrs,
       methods: scan.methods,
       hasTick: scan.hasTick,
-      defaults: scan.defaults,
     }
   }
 
-  // 静态扫 bootstrap 拿 varName 顺序（与 add() push 顺序一致）
-  const varNames = []
-  VAR_DECL_RE.lastIndex = 0
-  let m
-  while ((m = VAR_DECL_RE.exec(bootstrap))) {
-    varNames.push(m[1])
-  }
-
   // 构造 bridge，执行整段 sourceCode（class + bootstrap 都在函数作用域）
+  // varName 由 add() 内部生成，不再正则扫字面 const
   const bridge = makeBridge()
   try {
     const fn = new Function('GraphStarter', "'use strict';\n" + sourceCode)
@@ -108,71 +104,75 @@ export function runSource(sourceCode, state) {
     throw new Error(`sourceCode 执行失败: ${e.message}`)
   }
 
-  // varName 对应到 instances
-  if (varNames.length !== bridge._instances.length) {
-    throw new Error(
-      `varName 数 (${varNames.length}) 与 GraphStarter.add 调用数 (${bridge._instances.length}) 不匹配。` +
-      `每个 GraphStarter.add() 必须以 const <varName> = ... 形式调用。`
-    )
-  }
-  for (let i = 0; i < bridge._instances.length; i++) {
-    bridge._instances[i].varName = varNames[i]
-  }
-
   state.runtimeInstances.push(...bridge._instances)
 }
 
 // 把当前 runtimeInstances 序列化回 sourceCode 字符串
-// class 段原样保留（从 state.sourceCode 切出），启动代码段机器生成
-export function serializeCode(state) {
-  const { classes } = splitSource(state.sourceCode)
-  const classSection = classes.map(c => c.source).join('\n\n')
+// v0.9：class 段 3 个实例级 class field（description / name / attrs，name 空时省略）；
+//       启动段：add 调用 + attrs override + edges 数组赋值
+export function serializeCode(_state) {
+  const state = _state
+  const classLines = []
 
-  const lines = []
+  // class 段：从 state.classes 反向构建
+  for (const clsName of Object.keys(state.classes)) {
+    const cls = state.classes[clsName]
+    classLines.push('class ' + clsName + ' {')
+    classLines.push('  description = ' + formatValue(cls.description || ''))
+    // name 空时省略（让画布走 className 回退）
+    if (cls.name) {
+      classLines.push('  name = ' + formatValue(cls.name))
+    }
+    const attrsEntries = Object.entries(cls.attrs || {}).filter(([k]) => !k.startsWith('__') && k !== 'edges')
+    const attrsLiteral = attrsEntries.length
+      ? '{\n' + attrsEntries.map(([k, v]) => '    ' + k + ': ' + formatValue(v)).join(',\n') + '\n  }'
+      : '{}'
+    classLines.push('  attrs = ' + attrsLiteral)
+    classLines.push('}')
+  }
+
+  const bootLines = []
 
   // 1. GraphStarter.add 调用（按 runtimeInstances 顺序）
   for (const inst of state.runtimeInstances) {
-    lines.push(`const ${inst.varName} = GraphStarter.add(${inst.className})`)
+    bootLines.push('const ' + inst.varName + ' = GraphStarter.add(' + inst.className + ')')
   }
 
-  // 2. override + 引用赋值
+  // 2. attrs override（非 edges、非默认值）+ edges 数组赋值
   for (const inst of state.runtimeInstances) {
     const cls = state.classes[inst.className]
-    if (!cls) continue
-    for (const prop of cls.properties) {
-      if (cls.references.includes(prop)) {
-        const target = inst.attrs[prop]
-        if (target && target.__instId) {
-          lines.push(`${inst.varName}.${prop} = ${target.__instId.varName}`)
-        }
-      } else {
-        const defaultVal = cls.defaults[prop]
-        const curVal = inst.attrs[prop]
-        if (!_equal(defaultVal, curVal)) {
-          lines.push(`${inst.varName}.${prop} = ${formatValue(curVal)}`)
-        }
+    const clsAttrs = (cls && cls.attrs) || {}
+
+    for (const key of Object.keys(inst.attrs)) {
+      if (key.startsWith('__')) continue
+      if (key === 'edges') continue   // edges 单独处理（下方）
+      const curVal = inst.attrs[key]
+      const defaultVal = clsAttrs[key]
+      if (!_equal(defaultVal, curVal)) {
+        bootLines.push(inst.varName + '.' + key + ' = ' + formatValue(curVal))
       }
+    }
+
+    // edges 数组：每条 { target, description }，target 序列化为目标 varName
+    const edges = inst.attrs.edges
+    if (Array.isArray(edges) && edges.length > 0) {
+      const items = edges.map(e => {
+        const tgtVar = (e && e.target && typeof e.target === 'object' && e.target.__instId)
+          ? e.target.__instId.varName
+          : 'null'
+        const desc = (e && e.description != null) ? e.description : ''
+        return '    { target: ' + tgtVar + ', description: ' + formatValue(desc) + ' }'
+      })
+      bootLines.push(inst.varName + '.edges = [\n' + items.join(',\n') + '\n  ]')
     }
   }
 
-  // 3. describe 调用
-  for (const inst of state.runtimeInstances) {
-    for (const [refName, meta] of Object.entries(inst.edgeMeta)) {
-      if (!meta) continue
-      const text = meta.description ?? ''
-      const extras = []
-      if (meta.label && meta.label !== text) extras.push(`label: ${formatValue(meta.label)}`)
-      if (meta.relation) extras.push(`relation: ${formatValue(meta.relation)}`)
-      if (meta.weight !== undefined && meta.weight !== 1) extras.push(`weight: ${formatValue(meta.weight)}`)
-      const opts = extras.length ? ', {' + extras.join(', ') + '}' : ''
-      if (text || extras.length) {
-        lines.push(`GraphStarter.describe(${inst.varName}, '${refName}', ${formatValue(text)}${opts})`)
-      }
-    }
-  }
-
-  const bootstrapSection = lines.join('\n')
-  return classSection + '\n\n' + bootstrapSection + '\n'
+  const classSection = classLines.join('\n')
+  const bootSection = bootLines.join('\n')
+  if (!classSection && !bootSection) return ''
+  if (!classSection) return bootSection + '\n'
+  if (!bootSection) return classSection + '\n'
+  return classSection + '\n\n' + bootSection + '\n'
 }
 
 // 重置运行时：重新执行 sourceCode，丢弃所有运行时 mutation
@@ -180,7 +180,7 @@ export function resetRuntime(state) {
   runSource(state.sourceCode, state)
 }
 
-function _equal(a, b) {
+export function _equal(a, b) {
   if (a === b) return true
   if (a === null || b === null) return false
   if (typeof a !== typeof b) return false
@@ -188,10 +188,10 @@ function _equal(a, b) {
   return false
 }
 
-function formatValue(v) {
+export function formatValue(v) {
   if (typeof v === 'string') {
     const escaped = v.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')
-    return `'${escaped}'`
+    return "'" + escaped + "'"
   }
   if (v === null) return 'null'
   if (v === undefined) return 'undefined'

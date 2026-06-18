@@ -1,15 +1,17 @@
-// v0.6 代码编辑器：CodeMirror 6 wrapper
+// v0.7 代码编辑器：CodeMirror 6 wrapper + 双模式读写控制
 //
-// 角色：sourceCode 的唯一编辑入口（class 定义 + 启动代码）
+// 角色：
+//   - Code 模式：sourceCode 的唯一编辑入口（class 定义 + 启动代码 + 方法体 + 控制流）
+//   - UI 模式：只读显示（panel/serializeCode 写入的声明式 sourceCode）
 //
 // 数据流：
-//   用户输入 → debounce 400ms → commitCode → runSource → save + render
-//   panel 改属性 → syncCodeFromRuntime → dispatch sa-source-updated → refreshFromState
+//   Code 模式：用户输入 → debounce 400ms → commitCode → runSource → save + render
+//   UI 模式：panel 改属性 → syncCodeFromRuntime → dispatch sa-source-updated → refreshFromState
 //
 // 错误处理：sourceCode 语法错误时，runSource 抛异常，编辑器保留用户输入（让用户继续改），
 // runtimeInstances 不更新（保持上一次成功状态）。
 
-import { EditorState } from '@codemirror/state'
+import { EditorState, Compartment } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { javascript } from '@codemirror/lang-javascript'
@@ -24,6 +26,9 @@ let editor = null
 let debounceTimer = null
 let lastAppliedCode = null
 let errorMarker = null
+
+// readOnly 用 compartment 包装，运行时可以 reconfigure 切换（UI/Code 模式切换时用）
+const readOnlyCompartment = new Compartment()
 
 export function mountCodeView() {
   const container = document.getElementById('code-panel-body')
@@ -43,8 +48,11 @@ export function mountCodeView() {
         javascript(),
         oneDark,
         EditorView.lineWrapping,
+        // v0.7: 默认 UI 模式锁定；切到 Code 模式时 setCodeViewReadOnly(false) 解锁
+        readOnlyCompartment.of(EditorState.readOnly.of(state.editMode === 'ui')),
         EditorView.updateListener.of(update => {
           if (!update.docChanged) return
+          if (state.editMode !== 'code') return  // UI 模式下不应有用户输入
           clearTimeout(debounceTimer)
           debounceTimer = setTimeout(() => {
             commitCode(editor.state.doc.toString())
@@ -124,6 +132,14 @@ export function toggleCodeView() {
   if (!panel.classList.contains('hidden')) {
     refreshFromState()
   }
+}
+
+// v0.7: 切换编辑器读写状态（UI 模式锁、Code 模式解锁）
+export function setCodeViewReadOnly(locked) {
+  if (!editor) return
+  editor.dispatch({
+    effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(locked)),
+  })
 }
 
 // 显式提交（按 Ctrl+Enter 等）

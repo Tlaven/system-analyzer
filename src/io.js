@@ -12,52 +12,47 @@
 import { state } from './state.js'
 import { render } from './renderer.js'
 import { pushUndo } from './editor.js'
-import { applyLayout } from './physics.js'
+import { applyLayout, fitToView, spreadUnpositioned } from './physics.js'
 import { toB64 } from './utils.js'
 import { runSource, serializeCode } from './codegraph.js'
 import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
 
-// ============ Edges — 由 runtimeInstances + class emitters 派生 ============
+// ============ Edges — 由实例级 attrs.edges 派生 ============
 //
-// 边的存在条件（合取）：
-//   1. 源 class 的某方法体里有 this.<ref>.<attr> = ... （class emitter 声明）
-//   2. 源实例的 <ref> 当前指向某目标实例（attrs 身份比较）
-//   3. 目标实例的 class 声明了 <attr> 属性
+// v0.9 边的存在条件：
+//   源实例的 attrs.edges 数组含 { target, description } 条目；
+//   target 是另一 inst.attrs（含 __instId 反查），description 是该边的描述（per-edge）。
 //
-// edgeMeta key 在 v0.6 改为 refName（不是 targetId|attr），因为 v0.6 的 describe()
-// API 是 GraphStarter.describe(srcInst, refName, text)，按 refName 索引。
+// 一个实例可以有多个 edges；多个 edges 也可以指向同一个 target。
+// 边 id 用 `<srcVar>><tgtVar>>idx`（idx 是 attrs.edges 数组里的位置，区分多边场景）。
 export function deriveEdges() {
   const edges = []
   for (const inst of state.runtimeInstances) {
-    const cls = state.classes[inst.className]
-    if (!cls) continue
-    for (const em of cls.emitters) {
-      const refVal = inst.attrs[em.ref]
-      if (!refVal || typeof refVal !== 'object') continue
+    const arr = inst.attrs.edges
+    if (!Array.isArray(arr)) continue
+    arr.forEach((e, idx) => {
+      if (!e || typeof e !== 'object') return
+      const refVal = e.target
+      if (!refVal || typeof refVal !== 'object') return
       const targetInst = state.runtimeInstances.find(i => i.attrs === refVal)
-      if (!targetInst) continue
-      const targetCls = state.classes[targetInst.className]
-      if (!targetCls) continue
-      if (!targetCls.properties.includes(em.attr)) continue
-      const meta = (inst.edgeMeta || {})[em.ref] || {}
+      if (!targetInst) return
       edges.push({
-        id: inst.varName + '>' + em.method + '>' + em.ref + '>' + em.attr + '>' + targetInst.varName,
+        id: inst.varName + '>' + targetInst.varName + '>' + idx,
         source_instance: inst.varName,
         source_node: inst.varName,
-        source_method: em.method,
-        source_ref: em.ref,
-        source_port: em.ref,
+        source_ref: '',
+        source_port: '',
         target_instance: targetInst.varName,
         target_node: targetInst.varName,
-        target_attr: em.attr,
-        target_port: em.attr,
-        label: meta.label || '',
-        relation: meta.relation || '',
-        description: meta.description || '',
-        weight: meta.weight != null ? meta.weight : 1,
-        metadata: meta.metadata || {},
+        target_attr: '',
+        target_port: '',
+        label: '',
+        relation: '',
+        description: e.description != null ? String(e.description) : '',
+        weight: 1,
+        metadata: {},
       })
-    }
+    })
   }
   return edges
 }
@@ -83,8 +78,23 @@ export function wrapInstance(inst) {
     enumerable: false, configurable: true,
   })
   Object.defineProperty(inst, 'label', {
-    get() { return inst.varName },
-    set() { /* v0.6 varName 不可改 */ },
+    get() {
+      const cls = state.classes[inst.className]
+      return inst.attrs.name || (cls && cls.name) || inst.className || inst.varName
+    },
+    set() { /* v0.6 varName 不可改；name 通过 attrs.name 写 */ },
+    enumerable: false, configurable: true,
+  })
+  Object.defineProperty(inst, 'name', {
+    get() { return inst.attrs.name || '' },
+    enumerable: false, configurable: true,
+  })
+  Object.defineProperty(inst, 'description', {
+    get() {
+      const cls = state.classes[inst.className]
+      const v = inst.attrs.description
+      return v != null ? v : (cls.description || '')
+    },
     enumerable: false, configurable: true,
   })
   Object.defineProperty(inst, 'x', {
@@ -112,9 +122,14 @@ export function wrapInstance(inst) {
       const cls = state.classes[inst.className]
       const r = {}
       if (!cls) return r
-      for (const k of cls.properties) {
-        if (cls.references.includes(k)) continue
-        r[k] = inst.attrs[k]
+      const allKeys = new Set([
+        ...Object.keys(cls.attrs || {}),
+        ...Object.keys(inst.attrs),
+      ])
+      for (const k of allKeys) {
+        if (k === 'name' || k === 'description' || k === 'edges') continue
+        if (k.startsWith('__')) continue
+        r[k] = inst.attrs[k] !== undefined ? inst.attrs[k] : cls.attrs[k]
       }
       return r
     },
@@ -122,21 +137,15 @@ export function wrapInstance(inst) {
   })
   Object.defineProperty(inst, 'inputs', {
     get() {
-      const ins = new Set()
-      for (const e of deriveEdges()) {
-        if (e.target_instance === inst.varName) ins.add(e.target_attr)
-      }
-      return [...ins].map(id => ({ id, label: id }))
+      // v0.9: 没有命名端口概念，inputs 空数组（不再画端口圆点）
+      return []
     },
     enumerable: false, configurable: true,
   })
   Object.defineProperty(inst, 'outputs', {
     get() {
-      const outs = new Set()
-      for (const e of deriveEdges()) {
-        if (e.source_instance === inst.varName) outs.add(e.target_attr)
-      }
-      return [...outs].map(id => ({ id, label: id }))
+      // v0.9: 没有命名端口概念，outputs 空数组（不再画端口圆点）
+      return []
     },
     enumerable: false, configurable: true,
   })
@@ -157,30 +166,15 @@ function wrapAllInstances() {
   for (const inst of state.runtimeInstances) wrapInstance(inst)
 }
 
-// ============ EdgeMeta setter ============
-// v0.5 接口 setEdgeMeta(sourceInst, targetId, attr, meta)
-// v0.6 内部把 attr 映射回 refName（emitter.attr === attr → emitter.ref）
-export function setEdgeMeta(sourceInst, _targetVarName, attr, meta) {
-  if (!sourceInst.edgeMeta) sourceInst.edgeMeta = {}
-  const cls = state.classes[sourceInst.className]
-  if (!cls) return
-  const em = cls.emitters.find(e => e.attr === attr)
-  const refName = em ? em.ref : attr
-  if (meta === null) {
-    delete sourceInst.edgeMeta[refName]
-  } else {
-    sourceInst.edgeMeta[refName] = { ...(sourceInst.edgeMeta[refName] || {}), ...meta }
-  }
-}
-
 // ============ Export / Import (sourceCode 格式) ============
 export function exportSource() {
   return {
-    version: 3,
+    version: 6,
     sourceCode: state.sourceCode,
     visualState: JSON.parse(JSON.stringify(state.visualState)),
     graphId: state.graphId,
     title: state.graphTitle,
+    editMode: state.editMode,
   }
 }
 
@@ -206,6 +200,8 @@ export function importSource(data) {
 
   runSource(state.sourceCode, state)
   wrapAllInstances()
+  spreadUnpositioned()
+  fitToView()
 }
 
 export function onNew() {
@@ -222,6 +218,8 @@ export function onNew() {
   if (titleEl) titleEl.textContent = state.graphTitle
   runSource(state.sourceCode, state)
   wrapAllInstances()
+  spreadUnpositioned()
+  fitToView()
   localStorage.removeItem('sa_data')
   render()
 }
@@ -241,7 +239,7 @@ export function onExport() {
 export function exportJSON() { return exportSource() }
 export function importJSON(data) {
   // 接受 v0.6 {sourceCode} 或 v0.5 wrapper {version:3, sourceCode}
-  if (data && data.sourceCode) return importSource(data)
+  if (data && typeof data.sourceCode === 'string') return importSource(data)
   throw new Error('旧 v0.5 JSON 格式（含 instances 数组）不再支持')
 }
 
@@ -249,11 +247,12 @@ export function importJSON(data) {
 export function save() {
   try {
     localStorage.setItem('sa_data', JSON.stringify({
-      version: 3,
+      version: 6,
       sourceCode: state.sourceCode,
       visualState: state.visualState,
       graphId: state.graphId,
       graphTitle: state.graphTitle,
+      editMode: state.editMode,
     }))
   } catch (e) {
     console.warn('[save] 持久化失败', e)
@@ -265,8 +264,8 @@ export function load() {
     const raw = localStorage.getItem('sa_data')
     if (!raw) return false
     const d = JSON.parse(raw)
-    // 硬切换：v3 之前格式（v0.5 instances-based）全部丢弃
-    if (d.version !== 3) {
+    // 硬切换：v6 之前格式（v0.5/v0.6/v0.7/v0.8）全部丢弃——实例级 edges 模型与历史不兼容
+    if (d.version !== 6) {
       console.warn(`[load] 检测到旧版本 sa_data (v${d.version || '?'})，硬切换：忽略旧数据`)
       localStorage.removeItem('sa_data')
       return false
@@ -275,6 +274,7 @@ export function load() {
     state.visualState = d.visualState || { positions: {}, colors: {} }
     state.graphId = d.graphId || ('g_' + Date.now())
     state.graphTitle = d.graphTitle || '系统模型'
+    state.editMode = d.editMode === 'code' ? 'code' : 'ui'
     const titleEl = document.getElementById('title-text')
     if (titleEl) titleEl.textContent = state.graphTitle
 

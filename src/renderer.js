@@ -1,5 +1,5 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, NODE_RADIUS, PORT_R, ARROW_SZ, getPaletteColors } from './state.js'
-import { getNodeRect, getNodeH, getPortPos, edgePts, getEdgeStyle, truncateText, rectEdge } from './utils.js'
+import { getNodeRect, getNodeH, getPortPos, edgePts, getHandlePoints, getEdgeStyle, truncateText, rectEdge, formatScalar } from './utils.js'
 import { deriveEdges } from './io.js'
 
 export function drawGrid() {
@@ -29,12 +29,27 @@ export function drawGrid() {
 export function updateTooltip() {
   const tip = document.getElementById('tip')
   if (!tip) return
-  if (!state.hoverNode || state.mode || state.isDown) { tip.classList.add('hidden'); return }
+  if (state.mode || state.isDown) { tip.classList.add('hidden'); return }
+  let title = '', desc = '', err = ''
+  if (state.hoverEdge) {
+    const e = deriveEdges().find(ed => ed.id === state.hoverEdge)
+    if (e) {
+      // v0.9：边没有 ref 名，标题显示 `源 → 目标`，描述是 per-edge description
+      title = (e.source_instance || '') + ' → ' + (e.target_instance || '')
+      desc = e.description || ''
+    }
+  } else if (state.hoverNode) {
+    if (state.hoverNode.error) err = state.hoverNode.error
+    title = state.hoverNode.label || ''
+    const d = state.hoverNode.description
+    if (d) desc = d
+  }
+  if (!title && !desc && !err) { tip.classList.add('hidden'); return }
   const lines = []
-  if (state.hoverNode.error) { lines.push('⚠ ' + state.hoverNode.error); lines.push('') }
-  lines.push(state.hoverNode.label)
-  if (state.hoverNode.description) {
-    const d = state.hoverNode.description.length > 80 ? state.hoverNode.description.slice(0, 80) + '…' : state.hoverNode.description
+  if (err) { lines.push('⚠ ' + err); lines.push('') }
+  if (title) lines.push(title)
+  if (desc) {
+    const d = desc.length > 80 ? desc.slice(0, 80) + '…' : desc
     lines.push(''); lines.push(d)
   }
   tip.textContent = lines.join('\n')
@@ -96,16 +111,40 @@ export function render() {
   const DIM = 0.35
   const isDimmed = () => hoverConnectedEdgeIds !== null
 
-  for (const e of deriveEdges()) {
+  // 多边同对索引：按 (source_node, target_node) 分组，每对里给 idx（相对中心的偏移）
+  // 用于多边曲率错开 / 直线 y 偏移
+  const _allEdges = deriveEdges()
+  const _pairCount = new Map()
+  for (const e of _allEdges) {
+    const k = e.source_node + '|' + e.target_node
+    _pairCount.set(k, (_pairCount.get(k) || 0) + 1)
+  }
+  const _pairSeen = new Map()
+  const _edgeIdx = new Map()
+  for (const e of _allEdges) {
+    const k = e.source_node + '|' + e.target_node
+    const seen = _pairSeen.get(k) || 0
+    const total = _pairCount.get(k) || 1
+    _edgeIdx.set(e.id, seen - (total - 1) / 2)
+    _pairSeen.set(k, seen + 1)
+  }
+
+  for (const e of _allEdges) {
     const s = state.nodes.find(n => n.id === e.source_node), t = state.nodes.find(n => n.id === e.target_node)
     if (!s || !t) continue
-    const { p1, p2 } = edgePts(s, t, e), isSel = state.selEdge === e
+    const { p1, p2 } = edgePts(s, t, e), isSel = state.selEdge === e.id  // v0.7 Phase 5: 存 id 字符串
     const es = getEdgeStyle(e.relation), ec = isSel ? es.sel : es.color
     const isHighlighted = isDimmed() && hoverConnectedEdgeIds.has(e.id)
+    const idx = _edgeIdx.get(e.id) || 0  // 多边同对的偏移索引（0 = 居中）
     ctx.strokeStyle = ec; ctx.lineWidth = isSel ? 2.5 : isHighlighted ? 3.0 : 1.8
     if (isDimmed() && !isHighlighted) ctx.globalAlpha = DIM
     const es2 = config.edgeStyle
     const isCurve = es2 === 'curve'
+
+    // 多边同对的 y 偏移：直线模式直接挪端点；曲线模式挪控制点
+    const dyOff = idx * 12
+    const P1 = { x: p1.x, y: p1.y + (isCurve ? 0 : dyOff) }
+    const P2 = { x: p2.x, y: p2.y + (isCurve ? 0 : dyOff) }
 
     // Edge routing: avoid path clipping through own source/target nodes
     let route = null
@@ -114,20 +153,23 @@ export function render() {
     const sr = getNodeRect(s)
     const tr = getNodeRect(t)
     if (es2 === 'polyline') {
-      const isBackward = p2.x < p1.x - gap
+      const isBackward = P2.x < P1.x - gap
       if (isBackward) {
-        const d = Math.max(40, Math.abs(p2.x - p1.x) + gap)
-        const p1Up = p1.y < sr.y + sr.h / 2, p2Up = p2.y < tr.y + tr.h / 2
+        const d = Math.max(40, Math.abs(P2.x - P1.x) + gap)
+        const p1Up = P1.y < sr.y + sr.h / 2, p2Up = P2.y < tr.y + tr.h / 2
         const wy = (p1Up && p2Up) ? Math.min(sr.y, tr.y) - gap : Math.max(sr.y + sr.h, tr.y + tr.h) + gap
-        route = [p1, { x: p1.x + d, y: p1.y }, { x: p1.x + d, y: wy }, { x: p2.x - d, y: wy }, { x: p2.x - d, y: p2.y }, p2]
+        route = [P1, { x: P1.x + d, y: P1.y }, { x: P1.x + d, y: wy }, { x: P2.x - d, y: wy }, { x: P2.x - d, y: P2.y }, P2]
       } else {
-        const mx = (p1.x + p2.x) / 2
-        route = [p1, { x: mx, y: p1.y }, { x: mx, y: p2.y }, p2]
+        const mx = (P1.x + P2.x) / 2
+        route = [P1, { x: mx, y: P1.y }, { x: mx, y: P2.y }, P2]
       }
     } else if (isCurve) {
-      const dx = p2.x - p1.x, dy = p2.y - p1.y, dist = Math.hypot(dx, dy)
-      curveOff = Math.max(20, Math.min(dist * 0.4, 60))
-      if (p2.x < p1.x) curveOff = Math.max(curveOff, Math.abs(p2.x - p1.x) * 0.6 + 20)
+      // 控制点偏移：沿水平方向，按两节点相对位置自动选向（避免穿过节点）
+      const dx = P2.x - P1.x, dy = P2.y - P1.y, dist = Math.hypot(dx, dy)
+      const sign = dx >= 0 ? 1 : -1
+      curveOff = Math.max(30, Math.min(dist * 0.5, 80))
+      // 多边同对：控制点 y 偏移（视觉上像并行管道）
+      curveOff += Math.abs(idx) * 15
     }
 
     if (route) {
@@ -135,10 +177,12 @@ export function render() {
       for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y)
       ctx.stroke()
     } else if (isCurve) {
-      const cp1x = p1.x + curveOff, cp1y = p1.y, cp2x = p2.x - curveOff, cp2y = p2.y
-      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y); ctx.stroke()
+      const sign = (P2.x - P1.x) >= 0 ? 1 : -1
+      const cp1x = P1.x + sign * curveOff, cp1y = P1.y + dyOff
+      const cp2x = P2.x - sign * curveOff, cp2y = P2.y + dyOff
+      ctx.beginPath(); ctx.moveTo(P1.x, P1.y); ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, P2.x, P2.y); ctx.stroke()
     } else {
-      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(P1.x, P1.y); ctx.lineTo(P2.x, P2.y); ctx.stroke()
     }
 
     const ang = route ? Math.atan2(p2.y - route[route.length-2].y, p2.x - route[route.length-2].x) : isCurve ? 0 : Math.atan2(p2.y - p1.y, p2.x - p1.x)
@@ -160,27 +204,20 @@ export function render() {
     ctx.lineTo(p2.x - ARROW_SZ * Math.cos(ang + Math.PI / 6), p2.y - ARROW_SZ * Math.sin(ang + Math.PI / 6))
     ctx.closePath(); ctx.fill()
 
-    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2
-    let lb = ''
-    if (e.relation) lb += '[' + e.relation + '] '
-    if (e.label) lb += e.label
-    if (lb) {
-      ctx.save()
-      ctx.font = '12px "Microsoft YaHei",sans-serif'
-      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
-      ctx.fillStyle = isSel ? es.sel : es.color
-      ctx.fillText(lb, mx, my - 5)
-      ctx.restore()
-    }
     ctx.globalAlpha = 1
   }
 
   if (state.mode === 'edge' && state.tempEnd) {
     const s = state.nodes.find(n => n.id === state.edgeSrcId)
     if (s) {
-      const r = getNodeRect(s), st = rectEdge(r, state.tempEnd.x, state.tempEnd.y)
+      // 拖边虚线：从源节点右侧中点出发（跟实际边的左右水平出线一致）
+      // 不走 edgePts —— state.tempEnd 是 {x,y} 不是节点，edgePts 内部 getNodeRect 会抛错
+      const sr = getNodeRect(s)
+      const p1 = config.infoLevel === 'minimal'
+        ? { x: s.x + Math.max(sr.w, sr.h) / 2, y: s.y }
+        : { x: sr.x + sr.w, y: sr.y + sr.h / 2 }
       ctx.beginPath(); ctx.setLineDash([6, 4])
-      ctx.moveTo(st.x, st.y); ctx.lineTo(state.tempEnd.x, state.tempEnd.y)
+      ctx.moveTo(p1.x, p1.y); ctx.lineTo(state.tempEnd.x, state.tempEnd.y)
       ctx.strokeStyle = state.hoverNode ? pc.accent : pc.accent
       ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([])
     }
@@ -195,7 +232,6 @@ export function render() {
     const isRelated = !isDimmed() || isHov || isNbr
     if (matchAlpha < 1) ctx.globalAlpha = matchAlpha
     else if (isDimmed() && !isRelated) ctx.globalAlpha = DIM
-    const ns = config.nodeShape
     const vis = n.visual || {}
     const customBg = vis.color
     const nodeBg = customBg || pc.nodeBg
@@ -204,12 +240,13 @@ export function render() {
     const tc = nodeTc || pc.text2
     const sc = nodeTc || pc.text3
 
+    const lv = config.infoLevel
+    const isCircle = lv === 'minimal'
+
     if (isSel) { ctx.shadowColor = pc.accent + '40'; ctx.shadowBlur = 10 }
-    if (ns === 'circle') {
+    if (isCircle) {
       const rad = Math.max(r.w, r.h) / 2
       ctx.beginPath(); ctx.arc(n.x, n.y, rad, 0, Math.PI * 2)
-    } else if (ns === 'capsule') {
-      ctx.beginPath(); ctx.roundRect(r.x, r.y, r.w, r.h, r.h / 2)
     } else {
       ctx.beginPath(); ctx.roundRect(r.x, r.y, r.w, r.h, NODE_RADIUS)
     }
@@ -222,87 +259,85 @@ export function render() {
     ctx.lineWidth = isSel ? 2 : (isHov || isNbr || isSearchMatch) ? 2 : 1.2
     ctx.stroke()
 
-    const lv = config.infoLevel
-    // Compute content area (accounts for port label space in full mode)
-    let mIW = 0, mOW = 0
-    if (lv === 'full') {
-      ctx.font = '10px "Microsoft YaHei",sans-serif'
-      for (const p of n.inputs) { const pw = ctx.measureText(p.label || p.id).width; if (pw > mIW) mIW = pw }
-      for (const p of n.outputs) { const pw = ctx.measureText(p.label || p.id).width; if (pw > mOW) mOW = pw }
-    }
-    const portPad = lv === 'full' && (n.inputs.length || n.outputs.length)
-    const contL = r.x + (portPad ? mIW + 12 : 8), contR = r.x + r.w - (portPad ? mOW + 12 : 8), contW = contR - contL
+    const contL = r.x + 8, contR = r.x + r.w - 8, contW = contR - contL
 
-    ctx.font = '14px "Microsoft YaHei",sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = hc
-    const displayLabel = truncateText(ctx, n.label, Math.max(contW, NODE_PAD * 2))
-
-    if (lv === 'minimal') {
-      ctx.fillText(displayLabel, n.x, n.y)
+    if (isCircle) {
+      ctx.font = '14px "Microsoft YaHei",sans-serif'
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillStyle = hc
+      ctx.fillText(truncateText(ctx, n.label, Math.max(contW, NODE_PAD * 2)), n.x, n.y)
     } else {
-      const pk = Object.keys(n.properties)
-      const hasContent = lv === 'full'
-        ? (pk.length || n.inputs.length || n.outputs.length)
-        : (pk.length)
+      ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip()
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top'
 
-      if (!hasContent) {
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        ctx.fillStyle = hc; ctx.font = '14px "Microsoft YaHei",sans-serif'
-        ctx.fillText(truncateText(ctx, n.label, contW), n.x, n.y)
-      } else {
-        ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip()
-        ctx.textAlign = 'left'; ctx.textBaseline = 'top'
-        ctx.fillStyle = hc; ctx.font = 'bold 13px "Microsoft YaHei",sans-serif'
-        ctx.fillText(truncateText(ctx, n.label, contW), contL, r.y + 7)
+      ctx.fillStyle = hc; ctx.font = 'bold 13px "Microsoft YaHei",sans-serif'
+      ctx.fillText(truncateText(ctx, n.label, contW), contL, r.y + 7)
 
-        let iy = r.y + 26
-        if (pk.length) {
-          ctx.font = '11px "Microsoft YaHei",sans-serif'
-          const halfW = Math.max(20, contW / 2 - 4)
-          pk.slice(0, 4).forEach(k => {
-            const v = String(n.properties[k]); ctx.fillStyle = sc; ctx.fillText(k, contL, iy); ctx.textAlign = 'right'; ctx.fillStyle = tc; ctx.fillText(truncateText(ctx, v, halfW), contR, iy); ctx.textAlign = 'left'; iy += 17
-          })
-        }
-
-        if (lv === 'full') {
-          // description intentionally omitted
-        }
-        ctx.restore()
+      let iy = r.y + 28
+      if (lv === 'full') {
+        ctx.font = '11px "Microsoft YaHei",sans-serif'
+        ctx.fillStyle = sc
+        ctx.fillText(truncateText(ctx, n.varName, contW), contL, iy)
+        iy += 17
       }
+
+      const pk = Object.keys(n.properties)
+      const maxRows = lv === 'full' ? 6 : 4
+      const shown = pk.slice(0, maxRows)
+      if (shown.length) {
+        ctx.font = '11px "Microsoft YaHei",sans-serif'
+        const halfW = Math.max(20, contW / 2 - 4)
+        for (const k of shown) {
+          const v = formatScalar(n.properties[k])
+          ctx.fillStyle = sc; ctx.textAlign = 'left'
+          ctx.fillText(truncateText(ctx, k, halfW), contL, iy)
+          ctx.fillStyle = tc; ctx.textAlign = 'right'
+          ctx.fillText(truncateText(ctx, v, halfW), contR, iy)
+          iy += 17
+        }
+        if (pk.length > maxRows) {
+          ctx.fillStyle = sc; ctx.textAlign = 'left'
+          ctx.fillText('… +' + (pk.length - maxRows), contL, iy)
+        }
+      }
+
+      if (lv === 'full') {
+        const desc = n.description
+        if (desc) {
+          ctx.font = 'italic 11px "Microsoft YaHei",sans-serif'
+          ctx.fillStyle = sc; ctx.textAlign = 'left'
+          ctx.fillText(truncateText(ctx, desc, contW), contL, r.y + r.h - 18)
+        }
+      }
+      ctx.restore()
     }
 
     const pcol = pc.accent
     const pConnected = (dir, pid) => deriveEdges().some(e => dir === 'in' ? e.target_node === n.id && e.target_port === pid : e.source_node === n.id && e.source_port === pid)
-    if (n.inputs.length && lv !== 'minimal') {
+    const isSimple = v => v !== null && v !== undefined && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean')
+    if (n.inputs.length && !isCircle) {
       ctx.font = '10px "Microsoft YaHei",sans-serif'
       n.inputs.forEach((p, i) => {
         const py = r.y + r.h * (i + 1) / (n.inputs.length + 1)
         ctx.beginPath(); ctx.arc(r.x, py, PORT_R, 0, Math.PI * 2)
         if (pConnected('in', p.id)) { ctx.fillStyle = pcol; ctx.fill() }
         ctx.strokeStyle = pcol; ctx.lineWidth = 1.5; ctx.stroke()
-        if (lv === 'full') {
-          ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = pc.text3
-          ctx.fillText(truncateText(ctx, p.label || p.id, mIW + 8), r.x + 4, py)
-        }
         const cv = n.computed && n.computed[p.id]
-        if (cv !== undefined) {
-          ctx.textAlign = 'left'; ctx.fillStyle = pc.accent; ctx.fillText(truncateText(ctx, (p.label || p.id) + ': ' + (typeof cv === 'number' ? cv.toFixed(2) : cv), 80), r.x + 6, py - 11); ctx.textAlign = 'right'
+        if (isSimple(cv)) {
+          ctx.textAlign = 'left'; ctx.fillStyle = pc.accent; ctx.fillText(truncateText(ctx, formatScalar(cv), 60), r.x + 8, py - 11); ctx.textAlign = 'right'
         }
       })
     }
-    if (n.outputs.length && lv !== 'minimal') {
+    if (n.outputs.length && !isCircle) {
       ctx.font = '10px "Microsoft YaHei",sans-serif'
       n.outputs.forEach((p, i) => {
         const py = r.y + r.h * (i + 1) / (n.outputs.length + 1)
         ctx.beginPath(); ctx.arc(r.x + r.w, py, PORT_R, 0, Math.PI * 2)
         if (pConnected('out', p.id)) { ctx.fillStyle = pcol; ctx.fill() }
         ctx.strokeStyle = pcol; ctx.lineWidth = 1.5; ctx.stroke()
-        if (lv === 'full') {
-          ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = pc.text3
-          ctx.fillText(truncateText(ctx, p.label || p.id, mOW + 8), r.x + r.w - 4, py)
-        }
         const cv = n.computed && n.computed[p.id]
-        if (cv !== undefined) {
-          ctx.textAlign = 'right'; ctx.fillStyle = pc.accent; ctx.fillText(truncateText(ctx, (p.label || p.id) + ': ' + (typeof cv === 'number' ? cv.toFixed(2) : cv), 80), r.x + r.w - 6, py - 11); ctx.textAlign = 'left'
+        if (isSimple(cv)) {
+          ctx.textAlign = 'right'; ctx.fillStyle = pc.accent; ctx.fillText(truncateText(ctx, formatScalar(cv), 60), r.x + r.w - 8, py - 11); ctx.textAlign = 'left'
         }
       })
     }
@@ -328,9 +363,12 @@ export function render() {
         ctx.restore()
       }
     }
-    if (isSel && !n.inputs.length && !n.outputs.length && lv !== 'minimal') {
-      for (const p of [{ x: r.x + r.w / 2, y: r.y }, { x: r.x + r.w, y: r.y + r.h / 2 }, { x: r.x + r.w / 2, y: r.y + r.h }, { x: r.x, y: r.y + r.h / 2 }]) {
-        ctx.beginPath(); ctx.arc(p.x, p.y, PORT_R, 0, Math.PI * 2)
+    // v0.9：选中节点画 4 个拖柄圆点（上右下左中点）— 拖出边的入口
+    // 圆形 / 矩形都画；不再依赖 inputs/outputs（v0.9 无端口概念）
+    if (isSel) {
+      const handles = getHandlePoints(n)
+      for (const h of handles) {
+        ctx.beginPath(); ctx.arc(h.x, h.y, PORT_R, 0, Math.PI * 2)
         ctx.fillStyle = pcol; ctx.fill()
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke()
       }
@@ -340,8 +378,12 @@ export function render() {
 
   const emptyHint = document.getElementById('empty-hint')
   if (state.nodes.length === 0) {
-    emptyHint.innerHTML = '点击左侧 class 库面板<br>实例化 class 到画布'
+    emptyHint.innerHTML = '空画布<br><span style="font-size:13px;opacity:.85">点击 <kbd>+</kbd> 加节点 / 双击空白新建<br>或切到 <kbd>代码</kbd> 模式写 sourceCode</span>'
     emptyHint.style.display = 'block'
+  } else if (state.selInstance && state.editMode === 'ui') {
+    emptyHint.innerHTML = '<span style="font-size:13px;opacity:.85">拖节点边缘圆点 → 落到目标节点 = 建边</span>'
+    emptyHint.style.display = 'block'
+    // 不阻挡画布交互（pointer-events:none in CSS）
   } else {
     emptyHint.style.display = 'none'
   }

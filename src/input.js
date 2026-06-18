@@ -1,13 +1,16 @@
 import { state, config, DRAG_TH, PALETTES } from './state.js'
 import { render, updateTooltip } from './renderer.js'
 import { pushUndo, undo, selectInstance, selectEdge, deselectAll, delNode, delEdge } from './editor.js'
+window.selectInstance = selectInstance
 import { startPhysics, stopPhysics, applyLayout, fitToView } from './physics.js'
-import { importJSON, save, onExport, onNew, shareURL, deriveEdges, resetRuntime } from './io.js'
-import { toggleCodeView, commitCodeNow } from './codeview.js'
+import { importJSON, save, onExport, onNew, shareURL, deriveEdges, resetRuntime, syncCodeFromRuntime, wrapInstance } from './io.js'
+import { toggleCodeView, commitCodeNow, setCodeViewReadOnly } from './codeview.js'
 import { loadConfig, saveConfig, applyTheme } from './config.js'
-import { showNodePanel, showEdgePanel } from './panel.js'
-import { cCoords, screenToWorld, hitNode, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc } from './utils.js'
+import { showNodePanel } from './panel.js'
+import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName } from './utils.js'
 import { stepAll, propagate } from './engine.js'
+import { splitSource } from './parser.js'
+import { runSource, _equal, formatValue } from './codegraph.js'
 
 // 测试与调试钩子
 window.state = state
@@ -15,6 +18,13 @@ window.config = config
 window.propagate = propagate
 window.deriveEdges = deriveEdges
 window.__testImport = importJSON
+window.setEditMode = setEditMode
+// v0.7 Phase 5: 暴露给测试用的辅助函数
+window.selectEdge = selectEdge
+window.wrapInstance = wrapInstance
+window.showNodePanel = showNodePanel
+window.runSource = runSource
+window.syncCodeFromRuntime = syncCodeFromRuntime
 
 // ============================================================
 // Register all functions needed by inline onclick handlers in HTML
@@ -27,7 +37,7 @@ window.applyLayout = applyLayout
 window.delNode = n => delNode(n)
 window.delEdge = e => delEdge(e)
 window.resetZoom = () => { state.viewScale = 1; render() }
-window.toggleBurger = () => { alert('System Analyzer v0.6\nCode-as-truth + GraphStarter') }
+window.toggleBurger = () => { alert('System Analyzer v0.9\n双模式编辑（UI / Code）+ 实例级 edges 模型') }
 window.save = save
 window.resetRuntime = resetRuntime
 window.toggleCodeView = toggleCodeView
@@ -45,12 +55,457 @@ window.setExecMode = function(val) {
 }
 window.runPropagate = function(instId) { propagate(instId) }
 
-// v0.6：实例化改在代码编辑器里写 GraphStarter.add()；面板点击已禁用
-window.instantiateClass = function(_classId) {
-  alert('v0.6 实例化方式：打开代码编辑器（</> 按钮），在启动代码段加一行\n  const <varName> = GraphStarter.add(<ClassName>)')
+// v0.7 Phase 2：UI 模式新建/复制节点入口（Code 模式不响应）
+window.createNode = createNode
+window.copySelectedNode = () => { if (state.selInstance) copyInstance(state.selInstance) }
+window.copyInstance = copyInstance  // 给测试和 panel 直接传 inst 用
+// 兼容旧调用（实测无 HTML 引用，保险留 stub）
+window.instantiateClass = createNode
+
+// ============================================================
+// v0.7 双模式切换：UI 编辑 ↔ 代码
+// ============================================================
+
+// 启发式检测 sourceCode 是否含程序化结构或方法体（Code→UI 切换时用）
+// 含：for/while/if/switch/function/=> 控制流，或 class 内非 constructor 方法
+function isSourceCodeProgrammatic(code) {
+  if (!code) return false
+  // 控制流关键字（在 class 外的启动段也算）
+  const controlFlowRe = /\b(?:for\s*\(|while\s*\(|if\s*\(|switch\s*\(|function\b|=>)/
+  if (controlFlowRe.test(code)) return true
+  // class 内非 constructor 方法
+  try {
+    const { classes } = splitSource(code)
+    for (const c of classes) {
+      // 匹配 `<ident>(<params>) {` 且不是 constructor
+      const methodRe = /\b([a-zA-Z_$][\w$]*)\s*\([^)]*\)\s*\{/g
+      let m
+      while ((m = methodRe.exec(c.source))) {
+        if (m[1] !== 'constructor') return true
+      }
+    }
+  } catch (_) { /* splitSource 失败：保守起见视为程序化 */ return true }
+  return false
 }
 
-// Menu system
+// 切换编辑模式
+function setEditMode(mode) {
+  if (mode !== 'ui' && mode !== 'code') return
+  if (state.editMode === mode) return
+
+  if (mode === 'code') {
+    // UI → Code：无损切换。声明式 sourceCode 本来就是合法的 Code 模式代码。
+    state.editMode = 'code'
+    setCodeViewReadOnly(false)
+    // 打开 codeview 让用户看见
+    const cp = document.getElementById('code-panel')
+    if (cp && cp.classList.contains('hidden')) cp.classList.remove('hidden')
+    // panel 切到只读：重新渲染当前选中（如有）
+    if (state.selInstance) showNodePanel(state.selInstance)
+    updateEditModeUI()
+    save()
+    return
+  }
+
+  // Code → UI：检查是否含方法体/控制流
+  if (isSourceCodeProgrammatic(state.sourceCode)) {
+    const ok = confirm(
+      '当前代码含方法体或程序化结构。\n\n' +
+      '切换到 UI 模式会丢弃这些（class 段会从实例反向重建，丢方法体、注释、控制流）。\n\n' +
+      '是否继续？'
+    )
+    if (!ok) {
+      // 用户取消：UI 同步回 segmented control 选中状态
+      updateEditModeUI()
+      return
+    }
+    // 反向构建：serializeCode 重写 sourceCode（class 段从 state.classes 构建，丢方法体）
+    pushUndo()
+    syncCodeFromRuntime()  // 把当前 runtimeInstances 序列化回声明式 sourceCode
+    // 重新 runSource 同步 state.classes 与新（无方法体）sourceCode
+    try {
+      runSource(state.sourceCode, state)
+      for (const inst of state.runtimeInstances) wrapInstance(inst)
+    } catch (e) {
+      alert('反向构建失败：' + e.message)
+      updateEditModeUI()
+      return
+    }
+  }
+
+  state.editMode = 'ui'
+  setCodeViewReadOnly(true)
+  if (state.selInstance) showNodePanel(state.selInstance)
+  updateEditModeUI()
+  save()
+  render()
+}
+
+// 更新工具栏 segmented control 的视觉状态 + + 按钮启用/禁用
+export function updateEditModeUI() {
+  document.querySelectorAll('.edit-mode-btn').forEach(btn => {
+    const active = btn.dataset.mode === state.editMode
+    btn.classList.toggle('active', active)
+  })
+  // Code 模式下 + 按钮禁用（保持 Code 模式纯净）
+  const addBtn = document.getElementById('add-node-btn')
+  if (addBtn) {
+    addBtn.disabled = state.editMode === 'code'
+    addBtn.style.opacity = state.editMode === 'code' ? '0.4' : ''
+    addBtn.style.cursor = state.editMode === 'code' ? 'not-allowed' : 'pointer'
+  }
+}
+
+// ============================================================
+// v0.7 Phase 2：modal 对话框 + 新建/复制节点
+// ============================================================
+
+// 通用 modal：返回 Promise<values | null>（取消时 null）
+// fields: [{ name, label, type: 'text'|'datalist', default, options?, validate? }]
+//   validate(value, allValues) 返回字符串错误信息或 null
+// 测试钩子：设置 window.__modalPrefill = { fieldName: value, ... } 可绕过 UI 直接返回预填值
+export function showModal({ title, fields, submitLabel = '确定' }) {
+  // 测试钩子：绕过 UI
+  if (window.__modalPrefill) {
+    const prefill = window.__modalPrefill
+    window.__modalPrefill = null
+    for (const f of fields) {
+      const v = prefill[f.name]
+      if (v === undefined) continue
+      const err = f.validate ? f.validate(v, prefill) : null
+      if (err) return Promise.resolve(null)
+    }
+    return Promise.resolve(prefill)
+  }
+  return new Promise(resolve => {
+    const overlay = document.createElement('div')
+    overlay.className = 'modal-overlay'
+    const box = document.createElement('div')
+    box.className = 'modal-box'
+    box.style.width = '380px'
+
+    const titleEl = document.createElement('div')
+    titleEl.textContent = title
+    titleEl.style.cssText = 'font-size:15px;font-weight:600;color:var(--pnlhd);margin-bottom:14px'
+    box.appendChild(titleEl)
+
+    const inputs = {}
+    const errorEls = {}
+    for (const f of fields) {
+      const wrap = document.createElement('div')
+      wrap.className = 'field'
+      const lbl = document.createElement('span')
+      lbl.className = 'fl'
+      lbl.textContent = f.label
+      wrap.appendChild(lbl)
+
+      let input
+      if (f.type === 'datalist') {
+        const listId = 'modal-datalist-' + f.name + '-' + Date.now()
+        const dl = document.createElement('datalist')
+        dl.id = listId
+        for (const opt of (f.options || [])) {
+          const o = document.createElement('option')
+          o.value = opt
+          dl.appendChild(o)
+        }
+        document.body.appendChild(dl)
+        input = document.createElement('input')
+        input.type = 'text'
+        input.setAttribute('list', listId)
+      } else {
+        input = document.createElement('input')
+        input.type = 'text'
+      }
+      input.value = f.default || ''
+      input.dataset.fieldName = f.name
+      wrap.appendChild(input)
+      inputs[f.name] = input
+
+      const errEl = document.createElement('div')
+      errEl.style.cssText = 'font-size:11px;color:#e53935;margin-top:3px;min-height:14px'
+      errorEls[f.name] = errEl
+      wrap.appendChild(errEl)
+
+      box.appendChild(wrap)
+    }
+
+    const btnRow = document.createElement('div')
+    btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:12px'
+    const cancelBtn = document.createElement('button')
+    cancelBtn.textContent = '取消'
+    cancelBtn.style.cssText = 'padding:6px 16px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:5px;cursor:pointer;font-size:13px;font-family:inherit;color:var(--tbtnc)'
+    const submitBtn = document.createElement('button')
+    submitBtn.textContent = submitLabel
+    submitBtn.className = 'btn-primary'
+    btnRow.appendChild(cancelBtn)
+    btnRow.appendChild(submitBtn)
+    box.appendChild(btnRow)
+
+    overlay.appendChild(box)
+    document.body.appendChild(overlay)
+
+    let settled = false
+    const cleanup = () => {
+      document.body.removeChild(overlay)
+      // 清理可能添加的 datalist
+      document.querySelectorAll('datalist[id^="modal-datalist-"]').forEach(dl => dl.remove())
+    }
+    const finish = (val) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(val)
+    }
+    const attemptSubmit = () => {
+      const values = {}
+      let firstErrField = null
+      for (const f of fields) {
+        const v = inputs[f.name].value.trim()
+        values[f.name] = v
+        let err = null
+        if (f.validate) err = f.validate(v, values)
+        errorEls[f.name].textContent = err || ''
+        if (err && !firstErrField) firstErrField = inputs[f.name]
+      }
+      if (firstErrField) {
+        firstErrField.focus()
+        return
+      }
+      finish(values)
+    }
+
+    cancelBtn.onclick = () => finish(null)
+    submitBtn.onclick = attemptSubmit
+    overlay.onclick = e => { if (e.target === overlay) finish(null) }
+    box.onclick = e => e.stopPropagation()
+
+    // Enter 提交、Esc 取消
+    box.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); attemptSubmit() }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(null) }
+    })
+
+    // 焦点初始落在第一个字段
+    setTimeout(() => {
+      const first = inputs[fields[0].name]
+      if (first) { first.focus(); first.select() }
+    }, 0)
+  })
+}
+
+// 在 sourceCode 的 class 段末尾追加新 class 模板，启动段末尾追加 add 调用
+// 注意 v0.7：add() 第二参数显式 varName，让 runtimeInstance.varName 与 JS const 名一致
+function appendInstanceToSource(sourceCode, { className, varName, isNewClass }) {
+  const { classes, bootstrap } = splitSource(sourceCode)
+  // 重组：原 class 段 + （可选）新 class + '\n\n' + 原 bootstrap + 新 add 调用
+  const classSources = classes.map(c => c.source)
+  if (isNewClass) {
+    classSources.push(buildEmptyClassSource(className))
+  }
+  const newBootstrapLine = `const ${varName} = GraphStarter.add(${className}, ${JSON.stringify(varName)})`
+  const newBootstrap = bootstrap ? (bootstrap.trimEnd() + '\n' + newBootstrapLine) : newBootstrapLine
+  const classSection = classSources.join('\n\n')
+  if (!classSection) return newBootstrap + '\n'
+  return classSection + '\n\n' + newBootstrap + '\n'
+}
+
+// 空类模板——与 serializeCode 输出格式严格一致（v0.9：3 字段，无 name 无 edges）
+function buildEmptyClassSource(className) {
+  return `class ${className} {
+  description = ''
+  attrs = {}
+}`
+}
+
+// 构造复制块：add 调用 + override + edges 数组
+function buildCopyBlock(srcInst, newVar) {
+  const cls = state.classes[srcInst.className]
+  const clsAttrs = (cls && cls.attrs) || {}
+  const lines = [`const ${newVar} = GraphStarter.add(${srcInst.className}, ${JSON.stringify(newVar)})`]
+  for (const key of Object.keys(srcInst.attrs)) {
+    if (key.startsWith('__')) continue
+    if (key === 'edges') continue   // edges 单独处理
+    const defaultVal = clsAttrs[key]
+    const curVal = srcInst.attrs[key]
+    if (!_equal(defaultVal, curVal)) {
+      lines.push(`${newVar}.${key} = ${formatValue(curVal)}`)
+    }
+  }
+  // edges 数组复制（target 引用原样保留——指向相同目标实例）
+  const edges = srcInst.attrs.edges
+  if (Array.isArray(edges) && edges.length > 0) {
+    const items = edges.map(e => {
+      const tgtVar = (e && e.target && e.target.__instId)
+        ? e.target.__instId.varName
+        : 'null'
+      const desc = (e && e.description != null) ? e.description : ''
+      return `    { target: ${tgtVar}, description: ${formatValue(desc)} }`
+    })
+    lines.push(`${newVar}.edges = [\n` + items.join(',\n') + '\n  ]')
+  }
+  return lines.join('\n')
+}
+
+// 新建节点：modal 收集 className + varName → 追加 sourceCode → runSource
+export async function createNode() {
+  return createNodeAt(viewportCenterWorld().x, viewportCenterWorld().y)
+}
+
+// 在指定世界坐标新建节点（双击空白时用 click 坐标）
+export async function createNodeAt(worldX, worldY) {
+  if (state.editMode === 'code') return
+  const existingClasses = Object.keys(state.classes)
+  const values = await showModal({
+    title: '新建节点',
+    submitLabel: '创建',
+    fields: [
+      {
+        name: 'className',
+        label: 'Class 名（已有的可选，或输入新名）',
+        type: 'datalist',
+        options: existingClasses,
+        default: '',
+        validate: v => !isValidIdentifier(v) ? '需为合法 JS 标识符（字母/$/_ 开头）' : null,
+      },
+      {
+        name: 'varName',
+        label: '变量名',
+        type: 'text',
+        default: '',
+        validate: (v, all) => {
+          if (!isValidIdentifier(v)) return '需为合法 JS 标识符'
+          if (state.runtimeInstances.some(i => i.varName === v)) return '与现有变量名冲突'
+          return null
+        },
+      },
+    ],
+  })
+  if (!values) return
+  // 根据填的 className 动态算 varName 默认（用户没填时）
+  let varName = values.varName
+  if (!varName) {
+    varName = suggestUniqueVarName(values.className + '_1')
+  }
+
+  pushUndo()
+  const isNewClass = !existingClasses.includes(values.className)
+  state.sourceCode = appendInstanceToSource(state.sourceCode, {
+    className: values.className,
+    varName,
+    isNewClass,
+  })
+  // 预设位置，避免 spreadUnpositioned 移到默认位
+  state.visualState.positions[varName] = { x: worldX, y: worldY }
+  try {
+    runSource(state.sourceCode, state)
+  } catch (e) {
+    alert('新建节点失败：' + e.message)
+    return
+  }
+  for (const inst of state.runtimeInstances) wrapInstance(inst)
+  const newInst = state.runtimeInstances.find(i => i.varName === varName)
+  save()
+  render()
+  if (newInst) {
+    selectInstance(newInst)
+    showNodePanel(newInst)
+  }
+}
+
+// 复制节点：modal 收集新 varName → 追加 sourceCode 复制块
+export async function copyInstance(srcInst) {
+  if (state.editMode === 'code') return
+  if (!srcInst) return
+  const suggested = suggestUniqueVarName(srcInst.varName + '_2')
+  const values = await showModal({
+    title: '复制 ' + srcInst.varName,
+    submitLabel: '复制',
+    fields: [
+      {
+        name: 'varName',
+        label: '新变量名',
+        type: 'text',
+        default: suggested,
+        validate: v => {
+          if (!isValidIdentifier(v)) return '需为合法 JS 标识符'
+          if (state.runtimeInstances.some(i => i.varName === v)) return '与现有变量名冲突'
+          return null
+        },
+      },
+    ],
+  })
+  if (!values) return
+  pasteInstanceInternal(srcInst, values.varName)
+}
+
+// Ctrl+V 粘贴：不弹 modal，varName 用 `<原>_1` 起，冲突自动 `_2`、`_3`
+export function pasteInstanceNoModal(srcInst) {
+  if (state.editMode === 'code') return
+  if (!srcInst) return
+  const used = new Set(state.runtimeInstances.map(i => i.varName))
+  let n = 1
+  while (used.has(srcInst.varName + '_' + n)) n++
+  pasteInstanceInternal(srcInst, srcInst.varName + '_' + n)
+}
+
+// 内部：执行复制（构造 sourceCode + runSource + 选中）
+function pasteInstanceInternal(srcInst, newVar) {
+  pushUndo()
+  const copyBlock = buildCopyBlock(srcInst, newVar)
+  const { classes, bootstrap } = splitSource(state.sourceCode)
+  const classSection = classes.map(c => c.source).join('\n\n')
+  const newBootstrap = bootstrap ? (bootstrap.trimEnd() + '\n' + copyBlock) : copyBlock
+  state.sourceCode = classSection
+    ? classSection + '\n\n' + newBootstrap + '\n'
+    : newBootstrap + '\n'
+
+  const srcPos = state.visualState.positions[srcInst.varName] || { x: 0, y: 0 }
+  state.visualState.positions[newVar] = { x: srcPos.x + 40, y: srcPos.y + 40 }
+  const srcColor = state.visualState.colors[srcInst.varName]
+  if (srcColor) state.visualState.colors[newVar] = srcColor
+
+  try {
+    runSource(state.sourceCode, state)
+  } catch (e) {
+    alert('复制失败：' + e.message)
+    return
+  }
+  for (const inst of state.runtimeInstances) wrapInstance(inst)
+  const newInst = state.runtimeInstances.find(i => i.varName === newVar)
+  save()
+  render()
+  if (newInst) {
+    selectInstance(newInst)
+    showNodePanel(newInst)
+  }
+}
+
+// 拖边 mouseup：源 → 目标，直接 push { target, description } 到 srcInst.attrs.edges
+async function createEdgeFromDrag(srcInst, targetInst) {
+  if (state.editMode === 'code') return
+  // 收集边描述（可选）
+  const values = await showModal({
+    title: '连接 ' + srcInst.varName + ' → ' + targetInst.varName,
+    submitLabel: '连',
+    fields: [
+      { name: 'description', label: '边描述（可选）', type: 'text', default: '' },
+    ],
+  })
+  if (!values) return
+  pushUndo()
+  if (!Array.isArray(srcInst.attrs.edges)) srcInst.attrs.edges = []
+  srcInst.attrs.edges.push({ target: targetInst.attrs, description: values.description })
+  syncCodeFromRuntime(); render()
+  showNodePanel(srcInst)
+}
+
+// viewport 中心的世界坐标
+function viewportCenterWorld() {
+  return screenToWorld(window.innerWidth / 2, window.innerHeight / 2)
+}
+
+
 window.toggleMenu = function(name) {
   const trig = document.querySelector(`.menu-trigger[data-menu="${name}"]`)
   const menu = document.querySelector(`.dropdown-menu[data-menu="${name}"]`)
@@ -66,13 +521,10 @@ function closeAllMenus() {
 }
 
 // ── Hierarchical config constraints ──
-const keyToEl = { infoLevel: 'sel-info', nodeShape: 'sel-shape', edgeStyle: 'sel-edge', edgeAnim: 'sel-anim', positionMode: 'sel-pos' }
+const keyToEl = { infoLevel: 'sel-info', edgeStyle: 'sel-edge', edgeAnim: 'sel-anim', positionMode: 'sel-pos' }
 
 function applyConstraints(changedKey, changedVal) {
   const changes = {}
-  if (changedKey === 'infoLevel' && (changedVal === 'medium' || changedVal === 'full')) {
-    if (config.nodeShape !== 'rounded') changes.nodeShape = 'rounded'
-  }
   if (changedKey === 'edgeAnim' && changedVal !== 'none') {
     if (config.positionMode !== 'elastic') changes.positionMode = 'elastic'
   }
@@ -135,7 +587,18 @@ window.setBrightness = function(val) {
 
 // Bridge for inline onclick handlers in panel HTML that reference selNode/selEdge as globals
 Object.defineProperty(window, 'selNode', { get: () => state.selInstance, set: v => { state.selInstance = v } })
-Object.defineProperty(window, 'selEdge', { get: () => state.selEdge, set: v => { state.selEdge = v } })
+// v0.7 Phase 5: state.selEdge 现在存 id 字符串（活过 runSource）；window.selEdge 暴露 resolved 对象（兼容旧 HTML）
+Object.defineProperty(window, 'selEdge', {
+  get() {
+    const id = state.selEdge
+    if (!id) return null
+    return deriveEdges().find(e => e.id === id) || null
+  },
+  set(v) {
+    if (v && typeof v === 'object') state.selEdge = v.id
+    else state.selEdge = v
+  },
+})
 
 // ============================================================
 // Canvas event handlers
@@ -165,6 +628,16 @@ export function initInput() {
     if (e.button !== 0) return
     state.isDown = true; state.sX = p.x; state.sY = p.y; state.moved = false
 
+    // 拖柄优先（仅 selInstance 存在 + UI 模式）：选中节点的 4 个边缘中点圆点
+    if (state.editMode === 'ui' && state.selInstance) {
+      const handleHit = hitHandle(p.x, p.y)
+      if (handleHit) {
+        state.mode = 'edge'
+        state.edgeSrcId = handleHit.varName
+        state.tempEnd = { x: p.x, y: p.y }
+        return
+      }
+    }
     const n = hitNode(p.x, p.y)
     if (n) {
       state.mode = 'move'; state.dragInstance = n
@@ -172,7 +645,13 @@ export function initInput() {
       return
     }
     const ed = hitEdge(p.x, p.y)
-    if (ed) { selectEdge(ed); showEdgePanel(ed); return }
+    if (ed) {
+      // v0.9：边是实例级 attrs.edges 派生，点边 = 选中边 + 打开源节点 panel
+      selectEdge(ed)
+      const src = state.runtimeInstances.find(i => i.varName === ed.source_instance)
+      if (src) showNodePanel(src)
+      return
+    }
     deselectAll(); render()
   }
 
@@ -185,6 +664,11 @@ export function initInput() {
       return
     }
     const p = cCoords(e); state.mPos = p
+    if (state.isDown && state.mode === 'edge') {
+      state.tempEnd = { x: p.x, y: p.y }
+      render()
+      return
+    }
     if (state.isDown && state.mode === 'move') {
       const dx = p.x - state.sX, dy = p.y - state.sY
       if (Math.hypot(dx, dy) > DRAG_TH && !state.moved) {
@@ -209,7 +693,13 @@ export function initInput() {
       return
     }
     const n = hitNode(p.x, p.y)
-    if (n !== state.hoverInstance) { state.hoverInstance = n; render() }
+    const edge = n ? null : hitEdge(p.x, p.y)
+    const newHoverEdge = edge ? edge.id : null
+    if (n !== state.hoverInstance || newHoverEdge !== state.hoverEdge) {
+      state.hoverInstance = n
+      state.hoverEdge = newHoverEdge
+      render()
+    }
     updateTooltip()
   }
 
@@ -221,6 +711,24 @@ export function initInput() {
     }
     if (!state.isDown) return
     state.snapLines = []
+    if (state.mode === 'edge') {
+      const p = cCoords(e)
+      const target = hitNode(p.x, p.y)
+      const srcVar = state.edgeSrcId
+      // 清理 edge 模式状态
+      state.mode = null
+      state.edgeSrcId = null
+      state.tempEnd = null
+      state.isDown = false
+      if (target && srcVar) {
+        const src = state.runtimeInstances.find(i => i.varName === srcVar)
+        if (src && target !== src) {
+          createEdgeFromDrag(src, target)
+        }
+      }
+      render()
+      return
+    }
     if (state.mode === 'move') {
       if (!state.moved && state.dragInstance) {
         selectInstance(state.dragInstance); showNodePanel(state.dragInstance)
@@ -247,9 +755,11 @@ export function initInput() {
   }
 
   canvas.ondblclick = function(e) {
-    // 新模型下双击空白不创建实例。用户从左侧 class 库面板点击/拖拽来实例化。
+    // v0.7 Phase 2：双击空白新建节点（UI 模式）
+    if (state.editMode === 'code') return
     const p = cCoords(e)
     if (hitNode(p.x, p.y) || hitEdge(p.x, p.y)) return
+    createNodeAt(p.x, p.y)
   }
 
   canvas.oncontextmenu = e => e.preventDefault()
@@ -269,6 +779,21 @@ export function initInput() {
       return
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return }
+    // v0.8：Ctrl+C 复制当前选中实例 varName 到 state.clipboard（UI 模式 + canvas focus）
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !isEditing() && state.selInstance && state.editMode === 'ui') {
+      e.preventDefault()
+      state.clipboard = state.selVarName
+      return
+    }
+    // v0.8：Ctrl+V 不弹 modal，varName `_1` 起，冲突 `_2` `_3` ...
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !isEditing() && state.editMode === 'ui') {
+      e.preventDefault()
+      if (state.clipboard) {
+        const src = state.runtimeInstances.find(i => i.varName === state.clipboard)
+        if (src) pasteInstanceNoModal(src)
+      }
+      return
+    }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditing()) {
       e.preventDefault()
       if (state.selInstance) delNode(state.selInstance)
@@ -378,12 +903,15 @@ export function initInput() {
   if (bs) bs.value = config.brightness || 0
   document.getElementById('sel-layout').value = config.layout
   document.getElementById('sel-edge').value = config.edgeStyle
-  document.getElementById('sel-shape').value = config.nodeShape
   document.getElementById('sel-info').value = config.infoLevel
   document.getElementById('sel-pos').value = config.positionMode
   document.getElementById('sel-anim').value = config.edgeAnim
   document.getElementById('sel-exec').value = config.execMode || 'off'
   if (config.execMode === 'step') document.getElementById('step-btn').style.display = ''
+
+  // v0.7: 同步 segmented control 视觉态（reload 后 state.editMode 可能是 'code'）
+  updateEditModeUI()
+  // 同步 codeview readOnly（reload 后 mountCodeView 已用初始 editMode，但 segmented control 视觉需要这里补一次）
 
   console.log('✓ Input initialized')
 }
