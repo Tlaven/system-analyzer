@@ -27,14 +27,20 @@ import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
 // 边 id 用 `<srcVar>><tgtVar>>idx`（idx 是 attrs.edges 数组里的位置，区分多边场景）。
 export function deriveEdges() {
   const edges = []
-  for (const inst of state.runtimeInstances) {
+  const insts = state.runtimeInstances
+  // v0.10 性能：预建 attrs → inst 反查表，O(n) → O(1) 查找（原来用 find 是 O(n*m)）
+  const attrsToInst = new Map()
+  for (const inst of insts) {
+    attrsToInst.set(inst.attrs, inst)
+  }
+  for (const inst of insts) {
     const arr = inst.attrs.edges
     if (!Array.isArray(arr)) continue
     arr.forEach((e, idx) => {
       if (!e || typeof e !== 'object') return
       const refVal = e.target
       if (!refVal || typeof refVal !== 'object') return
-      const targetInst = state.runtimeInstances.find(i => i.attrs === refVal)
+      const targetInst = attrsToInst.get(refVal)
       if (!targetInst) return
       edges.push({
         id: inst.varName + '>' + targetInst.varName + '>' + idx,

@@ -107,33 +107,114 @@ export function rectEdge(r,tx,ty){
   if(adx*r.h>ady*r.w)sc=r.w/2/adx;else sc=r.h/2/ady
   return{x:cx+dx*sc,y:cy+dy*sc}
 }
-export function getPortPos(n,pid,dir){
-  if(config.infoLevel==='minimal') return null
-  const r=getNodeRect(n),arr=dir==='out'?n.outputs:n.inputs,idx=arr.findIndex(p=>p.id===pid)
-  if(idx<0)return null
-  const y=r.y+r.h*(idx+1)/(arr.length+1)
-  if(config.infoLevel==='minimal'){
-    const rad=Math.max(r.w,r.h)/2,cy=r.y+r.h/2,dy=y-cy
-    if(Math.abs(dy)>=rad)return dir==='out'?{x:r.x+r.w,y}:{x:r.x,y}
-    const hdx=Math.sqrt(rad*rad-dy*dy)
-    return dir==='out'?{x:r.x+r.w/2+hdx,y}:{x:r.x+r.w/2-hdx,y}
+// 端口系统：算法层端口（不入 attrs，仅作布线辅助）
+// 给定节点 n + 方向 dir，返回 Map<edgeId, {x, y}>
+// minimal 不画端口（圆周即端口），返回空 Map
+//
+// curve 模式：主方向选侧（|dx|>=|dy| 走左右、|dx|<|dy| 走上下）+ 整侧统一等分
+//   - source/target 按相对位置面对面对齐（出右入左 / 出左入右 / 出下入上 / 出上入下）
+//   - 同侧所有边按对端 y/x 排序后整侧等距排开（不按 target/source 分组）
+// 其他模式（straight/polyline）：固定右出左入 + (source,target) 半固定分组（旧规则）
+export function computeNodePorts(n, dir) {
+  if (config.infoLevel === 'minimal') return new Map()
+  const r = getNodeRect(n)
+  const edges = deriveEdges()
+  const related = dir === 'out'
+    ? edges.filter(e => e.source_node === n.id)
+    : edges.filter(e => e.target_node === n.id)
+  if (!related.length) return new Map()
+
+  if (config.edgeStyle === 'curve') {
+    return computeNodePortsCurve(n, dir, r)
   }
-  return dir==='out'?{x:r.x+r.w,y}:{x:r.x,y}
+  return computeNodePortsLegacy(n, dir, r, related)
 }
-// v0.9: 边的端点
-// - 矩形（medium/full）：左右水平出线 — 源右中点 → 目标左中点（电路图/流程图风格）
+
+// curve 模式端口：主方向选侧 + 整侧统一等分
+// 关键：in 和 out 边在同侧时共享一组等分位置（否则 N 同侧的 in/out 端口可能落到同位置）
+// 所以这里**同时**收集 N 的 in + out 边分组等分，再按 dir 过滤返回
+function computeNodePortsCurve(n, dir, r) {
+  const allEdges = deriveEdges()
+  const bySide = { right: [], left: [], top: [], bottom: [] }
+  for (const e of allEdges) {
+    if (e.source_node !== n.id && e.target_node !== n.id) continue
+    const isOut = e.source_node === n.id
+    const o = state.nodes.find(x => x.id === (isOut ? e.target_node : e.source_node))
+    if (!o) continue
+    const dx = o.x - n.x, dy = o.y - n.y
+    let side
+    if (Math.abs(dx) >= Math.abs(dy)) side = dx >= 0 ? 'right' : 'left'
+    else side = dy >= 0 ? 'bottom' : 'top'
+    bySide[side].push({ edge: e, dir: isOut ? 'out' : 'in', otherY: o.y, otherX: o.x })
+  }
+  const portsOut = new Map(), portsIn = new Map()
+  for (const side of ['right', 'left', 'top', 'bottom']) {
+    const group = bySide[side]
+    if (!group.length) continue
+    const isHorz = side === 'right' || side === 'left'
+    // 排序：水平侧按对端 y、垂直侧按对端 x，让端口顺序与对端位置一致
+    group.sort((a, b) => isHorz ? a.otherY - b.otherY : a.otherX - b.otherX)
+    const total = group.length
+    group.forEach((item, idx) => {
+      const t = (idx + 1) / (total + 1)  // 0 < t < 1，整侧等分
+      let x, y
+      if (side === 'right') { x = r.x + r.w; y = r.y + r.h * t }
+      else if (side === 'left') { x = r.x; y = r.y + r.h * t }
+      else if (side === 'top') { x = r.x + r.w * t; y = r.y }
+      else { x = r.x + r.w * t; y = r.y + r.h }
+      const port = { x, y }
+      ;(item.dir === 'out' ? portsOut : portsIn).set(item.edge.id, port)
+    })
+  }
+  return dir === 'out' ? portsOut : portsIn
+}
+
+// 旧规则（straight/polyline）：右出左入 + (source,target) 半固定分组
+function computeNodePortsLegacy(n, dir, r, related) {
+  const groupMap = new Map()
+  for (const e of related) {
+    const key = dir === 'out' ? e.target_node : e.source_node
+    if (!groupMap.has(key)) groupMap.set(key, [])
+    groupMap.get(key).push(e)
+  }
+  const groups = Array.from(groupMap.values())
+  const segmentH = r.h / (groups.length + 1)
+  const ports = new Map()
+  groups.forEach((groupEdges, gi) => {
+    const groupY = r.y + segmentH * (gi + 1)
+    const total = groupEdges.length
+    groupEdges.forEach((e, idxInGroup) => {
+      const off = total > 1 ? (idxInGroup - (total - 1) / 2) * 6 : 0
+      const y = groupY + off
+      const x = dir === 'out' ? r.x + r.w : r.x
+      ports.set(e.id, { x, y })
+    })
+  })
+  return ports
+}
+// 给定节点、边、方向，返回该边的端口位置
+export function getPortPos(n, edge, dir) {
+  if (config.infoLevel === 'minimal') return null
+  return computeNodePorts(n, dir).get(edge.id) || null
+}
+// v0.10: 边的端点
+// - 矩形（medium/full）：算法层端口（半固定 (target/source) 分组），多边同对天然并行
 // - 圆形（minimal）：沿两圆心连线，trimmed at perimeters（圆周交点）
 //   p1 = src + r·单位向量(tgt-src)，p2 = tgt - r·单位向量(tgt-src)
 //   这样箭头落在目标圆周上，永远可见；边沿径向出入，自然垂直于圆周
 export function edgePts(src,tgt,e){
-  const sr=getNodeRect(src),tr=getNodeRect(tgt)
   if(config.infoLevel==='minimal'){
+    const sr=getNodeRect(src),tr=getNodeRect(tgt)
     const sR=Math.max(sr.w,sr.h)/2,tR=Math.max(tr.w,tr.h)/2
     const dx=tgt.x-src.x,dy=tgt.y-src.y
     const d=Math.hypot(dx,dy)||1
     const ux=dx/d,uy=dy/d
     return{p1:{x:src.x+sR*ux,y:src.y+sR*uy},p2:{x:tgt.x-tR*ux,y:tgt.y-tR*uy}}
   }
+  const p1=getPortPos(src,e,'out'),p2=getPortPos(tgt,e,'in')
+  if(p1&&p2)return{p1,p2}
+  // fallback（理论不会走到，防御性）
+  const sr=getNodeRect(src),tr=getNodeRect(tgt)
   return{p1:{x:sr.x+sr.w,y:sr.y+sr.h/2},p2:{x:tr.x,y:tr.y+tr.h/2}}
 }
 // 拖柄位置：选中节点的 4 个边缘中点（上/右/下/左）
@@ -175,6 +256,70 @@ export function lineHitsRect(x1,y1,x2,y2,r){
     else{const t=q/p;if(p<0)tMin=Math.max(tMin,t);else tMax=Math.min(tMax,t)}
   }
   return tMin<=tMax&&tMin<=1&&tMax>=0
+}
+// curve 单段 cubic 几何：给定端点 P1/P2 算控制点 cp1/cp2，统一供 renderer 和 hitEdge 使用
+// 设计：
+//   - 单段 cubic（不分前向/反向），端点切线由主方向决定（水平占优→水平切线、垂直占优→垂直切线）
+//   - 控制点距离 tCtrl = clamp(dist * 0.4, 30, 120)，让曲率整体相近（短边曲率大、长边曲率小，视觉弯度比例一致）
+//   - **端点切线严格垂直优先于中间避让**：cp 沿外法线方向，不加任何 bulge
+//     （数学等价：单段 cubic 严格水平端点切线 ⟺ 中点 y 锁死 = (p1.y+p2.y)/2，无法避让 Y）
+//   - 中间遮挡由半透明叠加 + hover 高亮吸收（交互层处理复杂度）
+//   - 3+ 节点遮挡 → 返回 degrade:true 由调用方降级 straight（密度爆表时 straight 才是对的）
+export function computeCurveGeometry(s, t, p1, p2) {
+  const dx = p2.x - p1.x, dy = p2.y - p1.y
+  const dist = Math.hypot(dx, dy) || 1
+  const isHorz = Math.abs(dx) >= Math.abs(dy)
+  const dirX = isHorz ? (Math.sign(dx) || 1) : 0
+  const dirY = isHorz ? 0 : (Math.sign(dy) || 1)
+  const tCtrl = Math.max(30, Math.min(120, dist * 0.4))
+  // 3+ 节点遮挡降级 straight（不强行避让）
+  let hitCount = 0
+  for (const n of state.nodes) {
+    if (n.id === s.id || n.id === t.id) continue
+    if (lineHitsRect(p1.x, p1.y, p2.x, p2.y, getNodeRect(n))) {
+      hitCount++
+      if (hitCount >= 3) return { degrade: true }
+    }
+  }
+  return {
+    cp1: { x: p1.x + dirX * tCtrl, y: p1.y + dirY * tCtrl },
+    cp2: { x: p2.x - dirX * tCtrl, y: p2.y - dirY * tCtrl },
+    degrade: false,
+  }
+}
+
+// cubic bezier 采样点到 (px,py) 的最近距离（N 段线性近似 + distSeg）
+export function distToCubic(px, py, p1, cp1, cp2, p2, samples = 20) {
+  let minD = Infinity
+  let prevX = p1.x, prevY = p1.y
+  for (let i = 1; i <= samples; i++) {
+    const t = i / samples, u = 1 - t
+    const x = u * u * u * p1.x + 3 * u * u * t * cp1.x + 3 * u * t * t * cp2.x + t * t * t * p2.x
+    const y = u * u * u * p1.y + 3 * u * u * t * cp1.y + 3 * u * t * t * cp2.y + t * t * t * p2.y
+    const d = distSeg(px, py, prevX, prevY, x, y)
+    if (d < minD) minD = d
+    prevX = x; prevY = y
+  }
+  return minD
+}
+
+// v0.10 orthogonal 走线：找中转垂直段的"空通道"x 坐标
+// 默认取 P1/P2 中点；如果中点穿过中间节点，推到节点边缘外（gutter=16px）
+// 简化版：只处理第一个相交节点（多次相交时退化为 Z 形，可能仍穿过其他节点）
+export function findOrthogonalChannel(P1, P2, s, t) {
+  let mx = (P1.x + P2.x) / 2
+  const yMin = Math.min(P1.y, P2.y), yMax = Math.max(P1.y, P2.y)
+  for (const n of state.nodes) {
+    if (n.id === s.id || n.id === t.id) continue
+    const r = getNodeRect(n)
+    if (mx >= r.x && mx <= r.x + r.w && yMax >= r.y && yMin <= r.y + r.h) {
+      const left = r.x - 16, right = r.x + r.w + 16
+      const mid = (P1.x + P2.x) / 2
+      mx = Math.abs(left - mid) < Math.abs(right - mid) ? left : right
+      break
+    }
+  }
+  return mx
 }
 export function screenToWorld(sx,sy){return{x:(sx-state.viewX)/state.viewScale,y:(sy-state.viewY)/state.viewScale}}
 export function cCoords(e){const r=document.getElementById('canvas').getBoundingClientRect();return screenToWorld(e.clientX-r.left,e.clientY-r.top)}
@@ -253,25 +398,38 @@ export function hitHandle(x, y) {
 }
 export function hitEdge(x, y) {
   const edges = deriveEdges()
+  const isCurveMode = config.edgeStyle === 'curve' && config.infoLevel !== 'minimal'
   for (let i = edges.length - 1; i >= 0; i--) {
     const e = edges[i], s = state.nodes.find(n => n.id === e.source_node), t = state.nodes.find(n => n.id === e.target_node)
     if (!s || !t) continue
     const { p1, p2 } = edgePts(s, t, e)
+    if (isCurveMode) {
+      const geo = computeCurveGeometry(s, t, p1, p2)
+      if (!geo.degrade) {
+        if (distToCubic(x, y, p1, geo.cp1, geo.cp2, p2) < EDGE_HIT) return e
+        continue
+      }
+      // degrade（3+ 遮挡）→ 直线 fallback
+    }
     if (distSeg(x, y, p1.x, p1.y, p2.x, p2.y) < EDGE_HIT) return e
   }
   return null
 }
+// v0.10 端口化：算法层端口的 hit 检测（medium/full）
+// minimal 模式无显式端口（圆周即端口），返回 null
 export function hitPort(x, y) {
+  if (config.infoLevel === 'minimal') return null
   for (let i = state.nodes.length - 1; i >= 0; i--) {
     const n = state.nodes[i]
-    for (const p of n.inputs) { const pp = getPortPos(n, p.id, 'in'); if (pp && Math.hypot(x - pp.x, y - pp.y) < PORT_HIT) return { node: n, port: p, dir: 'in', x: pp.x, y: pp.y } }
-    for (const p of n.outputs) { const pp = getPortPos(n, p.id, 'out'); if (pp && Math.hypot(x - pp.x, y - pp.y) < PORT_HIT) return { node: n, port: p, dir: 'out', x: pp.x, y: pp.y } }
-  }
-  if (!state.selNode) return null
-  const sr = getNodeRect(state.selNode)
-  if (!state.selNode.inputs.length && !state.selNode.outputs.length) {
-    for (const p of [{ x: sr.x + sr.w / 2, y: sr.y }, { x: sr.x + sr.w, y: sr.y + sr.h / 2 }, { x: sr.x + sr.w / 2, y: sr.y + sr.h }, { x: sr.x, y: sr.y + sr.h / 2 }]) {
-      if (Math.hypot(x - p.x, y - p.y) < PORT_HIT) return { node: state.selNode, port: null, dir: '', x: p.x, y: p.y }
+    for (const [edgeId, pos] of computeNodePorts(n, 'out')) {
+      if (Math.hypot(x - pos.x, y - pos.y) < PORT_HIT) {
+        return { node: n, edgeId, dir: 'out', x: pos.x, y: pos.y }
+      }
+    }
+    for (const [edgeId, pos] of computeNodePorts(n, 'in')) {
+      if (Math.hypot(x - pos.x, y - pos.y) < PORT_HIT) {
+        return { node: n, edgeId, dir: 'in', x: pos.x, y: pos.y }
+      }
     }
   }
   return null

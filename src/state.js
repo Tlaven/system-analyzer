@@ -117,6 +117,7 @@ export const config = {
   infoLevel: 'minimal', positionMode: 'manual', edgeAnim: 'none',
   brightness: 0, palette: 'classic',
   execMode: 'off',
+  layoutDirection: 'TB',  // v0.10: 'LR' (层在 x 轴) | 'TB' (层在 y 轴)，hierarchical 布局 + 端口方向共用
 }
 
 // ============ v0.7 dual-mode state ============

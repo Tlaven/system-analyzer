@@ -153,5 +153,7 @@ scanner 读 `new cls()` 实例上的这 3 个字段（不扫 static、不扫 con
 
 - `src/llms.txt` — AI-facing onboarding doc, copied to `dist/` on build
 - `docs/node-interaction-redesign.md` — v0.8 节点交互模型重构设计文档（**已被 v0.9 部分取代：边模型已迁到实例级**，但节点身份字段、Ctrl+C/V、拖边交互等设计意图仍有效）
-- `docs/visualization-modes.md` — 画布三档信息密度（minimal 圆 / medium/full 圆角矩形）+ hover tooltip
+- `docs/visualization-modes.md` — **渲染层**：画布三档信息密度（minimal 圆 / medium/full 圆角矩形）+ 防溢出 + hover tooltip + 边可视化哲学（4 核心思想 + 9 组合矩阵）
+- `docs/edge-routing.md` — **路由层**：三种布线（straight 不绕 / curve 软绕 / orthogonal 硬绕）+ 端口系统（算法层端口重新引入）+ 避让算法 + 落地次序
+- `docs/layouts.md` — **布局层**：四种布局（manual/force/circular/hierarchical）重做方向 + grid 新增 + 三个感知（拓扑/方向/模式）+ 与端口方向联动
 - `docs/spec.md` — historical design notes (pre-v0.6), **not actively maintained**

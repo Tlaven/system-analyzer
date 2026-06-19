@@ -138,6 +138,10 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
       <div class="menu-row"><span>布局</span><select id="sel-layout" onchange="applyLayout(this.value)">
         <option value="manual">手动</option><option value="force">力导向</option>
         <option value="circular">圆形</option><option value="hierarchical">层次</option>
+        <option value="grid">网格</option>
+      </select></div>
+      <div class="menu-row"><span>方向</span><select id="sel-layout-dir" onchange="setLayoutDirection(this.value)">
+        <option value="TB">上下</option><option value="LR">左右</option>
       </select></div>
       <div class="menu-sep"></div>
       <div class="menu-label">内容</div>

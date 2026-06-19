@@ -1,5 +1,5 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, NODE_RADIUS, PORT_R, ARROW_SZ, getPaletteColors } from './state.js'
-import { getNodeRect, getNodeH, getPortPos, edgePts, getHandlePoints, getEdgeStyle, truncateText, rectEdge, formatScalar } from './utils.js'
+import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, rectEdge, formatScalar } from './utils.js'
 import { deriveEdges } from './io.js'
 
 export function drawGrid() {
@@ -111,82 +111,83 @@ export function render() {
   const DIM = 0.35
   const isDimmed = () => hoverConnectedEdgeIds !== null
 
-  // 多边同对索引：按 (source_node, target_node) 分组，每对里给 idx（相对中心的偏移）
-  // 用于多边曲率错开 / 直线 y 偏移
+  // 多边同对的并行由端口分配处理（edgePts → getPortPos → computeNodePorts）
   const _allEdges = deriveEdges()
-  const _pairCount = new Map()
-  for (const e of _allEdges) {
-    const k = e.source_node + '|' + e.target_node
-    _pairCount.set(k, (_pairCount.get(k) || 0) + 1)
-  }
-  const _pairSeen = new Map()
-  const _edgeIdx = new Map()
-  for (const e of _allEdges) {
-    const k = e.source_node + '|' + e.target_node
-    const seen = _pairSeen.get(k) || 0
-    const total = _pairCount.get(k) || 1
-    _edgeIdx.set(e.id, seen - (total - 1) / 2)
-    _pairSeen.set(k, seen + 1)
-  }
 
   for (const e of _allEdges) {
     const s = state.nodes.find(n => n.id === e.source_node), t = state.nodes.find(n => n.id === e.target_node)
     if (!s || !t) continue
-    const { p1, p2 } = edgePts(s, t, e), isSel = state.selEdge === e.id  // v0.7 Phase 5: 存 id 字符串
-    const es = getEdgeStyle(e.relation), ec = isSel ? es.sel : es.color
-    const isHighlighted = isDimmed() && hoverConnectedEdgeIds.has(e.id)
-    const idx = _edgeIdx.get(e.id) || 0  // 多边同对的偏移索引（0 = 居中）
-    ctx.strokeStyle = ec; ctx.lineWidth = isSel ? 2.5 : isHighlighted ? 3.0 : 1.8
-    if (isDimmed() && !isHighlighted) ctx.globalAlpha = DIM
+    const { p1, p2 } = edgePts(s, t, e), isSel = state.selEdge === e.id
+    const isHovered = state.hoverEdge === e.id
+    const es = getEdgeStyle(e.relation)
     const es2 = config.edgeStyle
     // 圆形（minimal）模式下 curve 降级为直线 — 圆心连线硬加曲线只会变形
     const isCurve = es2 === 'curve' && config.infoLevel !== 'minimal'
+    const isHighlighted = isDimmed() && hoverConnectedEdgeIds.has(e.id)
+    const ec = isSel ? es.sel : (isHovered ? es.sel : es.color)
+    ctx.strokeStyle = ec
+    ctx.lineWidth = isSel ? 2.5 : (isHovered || isHighlighted) ? 3.0 : 1.8
+    // alpha：hoverNode dim 时相关边全实、无关边 DIM；否则 curve 默认半透明（sel/hover 时全实），其他模式全实
+    let alpha = 1.0
+    if (isDimmed()) alpha = isHighlighted ? 1.0 : DIM
+    else if (isSel || isHovered) alpha = 1.0
+    else if (isCurve) alpha = 0.55
+    ctx.globalAlpha = alpha
 
-    // 多边同对的 y 偏移：直线模式直接挪端点；曲线模式挪控制点
-    const dyOff = idx * 12
-    const P1 = { x: p1.x, y: p1.y + (isCurve ? 0 : dyOff) }
-    const P2 = { x: p2.x, y: p2.y + (isCurve ? 0 : dyOff) }
+    // P1/P2 已由端口分配处理多边同对并行
+    const P1 = p1, P2 = p2
 
     // Edge routing: avoid path clipping through own source/target nodes
     let route = null
-    let curveOff = null
+    let curveCubic = null
+    let curveDegrade = false
     const gap = 16
     const sr = getNodeRect(s)
     const tr = getNodeRect(t)
     if (es2 === 'polyline') {
       const isBackward = P2.x < P1.x - gap
       if (isBackward) {
+        // 反向边：U 形外圈（绕到节点上方或下方）
         const d = Math.max(40, Math.abs(P2.x - P1.x) + gap)
         const p1Up = P1.y < sr.y + sr.h / 2, p2Up = P2.y < tr.y + tr.h / 2
         const wy = (p1Up && p2Up) ? Math.min(sr.y, tr.y) - gap : Math.max(sr.y + sr.h, tr.y + tr.h) + gap
         route = [P1, { x: P1.x + d, y: P1.y }, { x: P1.x + d, y: wy }, { x: P2.x - d, y: wy }, { x: P2.x - d, y: P2.y }, P2]
+      } else if (Math.abs(P1.y - P2.y) < 4) {
+        // 同行：直接水平线
+        route = [P1, P2]
       } else {
-        const mx = (P1.x + P2.x) / 2
+        // Z 形 + 空通道查找（避开中间节点）
+        const mx = findOrthogonalChannel(P1, P2, s, t)
         route = [P1, { x: mx, y: P1.y }, { x: mx, y: P2.y }, P2]
       }
     } else if (isCurve) {
-      // 控制点偏移：沿水平方向，按两节点相对位置自动选向（避免穿过节点）
-      const dx = P2.x - P1.x, dy = P2.y - P1.y, dist = Math.hypot(dx, dy)
-      const sign = dx >= 0 ? 1 : -1
-      curveOff = Math.max(30, Math.min(dist * 0.5, 80))
-      // 多边同对：控制点 y 偏移（视觉上像并行管道）
-      curveOff += Math.abs(idx) * 15
+      // 单段 cubic + 主方向切线 + bulge 避让（不分前向/反向）
+      const geo = computeCurveGeometry(s, t, P1, P2)
+      if (geo.degrade) curveDegrade = true
+      else curveCubic = geo
     }
 
     if (route) {
       ctx.beginPath(); ctx.moveTo(route[0].x, route[0].y)
       for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y)
       ctx.stroke()
-    } else if (isCurve) {
-      const sign = (P2.x - P1.x) >= 0 ? 1 : -1
-      const cp1x = P1.x + sign * curveOff, cp1y = P1.y + dyOff
-      const cp2x = P2.x - sign * curveOff, cp2y = P2.y + dyOff
-      ctx.beginPath(); ctx.moveTo(P1.x, P1.y); ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, P2.x, P2.y); ctx.stroke()
+    } else if (isCurve && curveCubic) {
+      // 单段 cubic：P1 → cp1 → cp2 → P2
+      ctx.beginPath()
+      ctx.moveTo(P1.x, P1.y)
+      ctx.bezierCurveTo(curveCubic.cp1.x, curveCubic.cp1.y, curveCubic.cp2.x, curveCubic.cp2.y, P2.x, P2.y)
+      ctx.stroke()
     } else {
+      // straight 或 curve 降级（3+ 节点遮挡，强行绕只会更乱）
       ctx.beginPath(); ctx.moveTo(P1.x, P1.y); ctx.lineTo(P2.x, P2.y); ctx.stroke()
     }
 
-    const ang = route ? Math.atan2(p2.y - route[route.length-2].y, p2.x - route[route.length-2].x) : isCurve ? 0 : Math.atan2(p2.y - p1.y, p2.x - p1.x)
+    // 箭头方向：polyline 用 route 末段切线；curve 用 cp2→P2 切线；straight 用基线方向
+    const ang = route
+      ? Math.atan2(p2.y - route[route.length-2].y, p2.x - route[route.length-2].x)
+      : (isCurve && curveCubic)
+        ? Math.atan2(p2.y - curveCubic.cp2.y, p2.x - curveCubic.cp2.x)
+        : Math.atan2(p2.y - p1.y, p2.x - p1.x)
     if (config.edgeAnim === 'dashFlow') {
       ctx.save()
       ctx.setLineDash([8, 6]); ctx.lineDashOffset = -state.physTime * 0.8
@@ -318,35 +319,9 @@ export function render() {
       ctx.restore()
     }
 
+    // 端口圆点不画——端口是抽象的几何概念（边的出入点），不需要可见标记
+    // 拖柄（选中节点时显示）是创建边的入口，仍然保留
     const pcol = pc.accent
-    const pConnected = (dir, pid) => deriveEdges().some(e => dir === 'in' ? e.target_node === n.id && e.target_port === pid : e.source_node === n.id && e.source_port === pid)
-    const isSimple = v => v !== null && v !== undefined && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean')
-    if (n.inputs.length && !isCircle) {
-      ctx.font = '10px "Microsoft YaHei",sans-serif'
-      n.inputs.forEach((p, i) => {
-        const py = r.y + r.h * (i + 1) / (n.inputs.length + 1)
-        ctx.beginPath(); ctx.arc(r.x, py, PORT_R, 0, Math.PI * 2)
-        if (pConnected('in', p.id)) { ctx.fillStyle = pcol; ctx.fill() }
-        ctx.strokeStyle = pcol; ctx.lineWidth = 1.5; ctx.stroke()
-        const cv = n.computed && n.computed[p.id]
-        if (isSimple(cv)) {
-          ctx.textAlign = 'left'; ctx.fillStyle = pc.accent; ctx.fillText(truncateText(ctx, formatScalar(cv), 60), r.x + 8, py - 11); ctx.textAlign = 'right'
-        }
-      })
-    }
-    if (n.outputs.length && !isCircle) {
-      ctx.font = '10px "Microsoft YaHei",sans-serif'
-      n.outputs.forEach((p, i) => {
-        const py = r.y + r.h * (i + 1) / (n.outputs.length + 1)
-        ctx.beginPath(); ctx.arc(r.x + r.w, py, PORT_R, 0, Math.PI * 2)
-        if (pConnected('out', p.id)) { ctx.fillStyle = pcol; ctx.fill() }
-        ctx.strokeStyle = pcol; ctx.lineWidth = 1.5; ctx.stroke()
-        const cv = n.computed && n.computed[p.id]
-        if (isSimple(cv)) {
-          ctx.textAlign = 'right'; ctx.fillStyle = pc.accent; ctx.fillText(truncateText(ctx, formatScalar(cv), 60), r.x + r.w - 8, py - 11); ctx.textAlign = 'left'
-        }
-      })
-    }
     // Error display
     if (n.error) {
       ctx.save()

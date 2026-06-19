@@ -576,6 +576,15 @@ window.setPositionMode = function(val) {
   render()
 }
 
+// v0.10: 布局方向切换（hierarchical 布局 + 端口方向共用，但当前只直接影响 hierarchical）
+window.setLayoutDirection = function(val) {
+  config.layoutDirection = val
+  saveConfig()
+  // 若当前是 hierarchical，重跑一次以应用新方向
+  if (config.layout === 'hierarchical') applyLayout('hierarchical')
+  else render()
+}
+
 window.setBrightness = function(val) {
   config.brightness = parseInt(val) || 0
   const lbl = document.getElementById('brightness-label')
@@ -902,6 +911,8 @@ export function initInput() {
   const bs = document.getElementById('brightness-slider')
   if (bs) bs.value = config.brightness || 0
   document.getElementById('sel-layout').value = config.layout
+  const ldir = document.getElementById('sel-layout-dir')
+  if (ldir) ldir.value = config.layoutDirection || 'TB'
   document.getElementById('sel-edge').value = config.edgeStyle
   document.getElementById('sel-info').value = config.infoLevel
   document.getElementById('sel-pos').value = config.positionMode
