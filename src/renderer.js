@@ -269,10 +269,18 @@ export function render() {
     const contL = r.x + 8, contR = r.x + r.w - 8, contW = contR - contL
 
     if (isCircle) {
-      ctx.font = '14px "Microsoft YaHei",sans-serif'
+      const radius = r.w / 2
+      let fontSize = Math.max(10, Math.min(16, Math.round(radius * 0.35)))
+      const label = n.label || ''
+      const maxW = Math.max(contW, NODE_PAD * 2)
+      ctx.font = fontSize + 'px "Microsoft YaHei",sans-serif'
+      while (fontSize > 10 && ctx.measureText(label).width > maxW) {
+        fontSize--
+        ctx.font = fontSize + 'px "Microsoft YaHei",sans-serif'
+      }
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       ctx.fillStyle = hc
-      ctx.fillText(truncateText(ctx, n.label, Math.max(contW, NODE_PAD * 2)), n.x, n.y)
+      ctx.fillText(truncateText(ctx, label, maxW), n.x, n.y)
     } else {
       ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip()
       ctx.textAlign = 'left'; ctx.textBaseline = 'top'
