@@ -13,7 +13,7 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 }
 
 // Constants
-export const NODE_MIN_W = 120, NODE_MAX_W = 240, NODE_H = 52
+export const NODE_MIN_W = 156, NODE_MAX_W = 240, NODE_H = 52
 export const NODE_RADIUS = 8, NODE_PAD = 16
 export const PORT_R = 6, PORT_HIT = 10, ARROW_SZ = 10, EDGE_HIT = 12, DRAG_TH = 4
 export const MAX_UNDO = 50

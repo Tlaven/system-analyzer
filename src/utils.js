@@ -38,11 +38,16 @@ function measureText(text, font) {
   return ctx.measureText(text == null ? '' : text).width
 }
 
-// minimal 圆形半径：文字宽度自适应，封顶 40，下限 22
+// minimal 圆形半径：文字宽度自适应 + 连接边数微调，下限 22
 export function getNodeRadius(n) {
   const label = n.label || ''
   const w = measureText(label, '14px "Microsoft YaHei",sans-serif')
-  return Math.min(40, Math.max(22, w / 2 + 8))
+  const base = Math.max(22, w / 2 + 8)
+  let ec = 0
+  for (const e of deriveEdges()) {
+    if (e.source_node === n.varName || e.target_node === n.varName) ec++
+  }
+  return Math.min(55, base + ec * 2)
 }
 
 export function getNodeH(n, estW) {

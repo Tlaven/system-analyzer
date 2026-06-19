@@ -11,7 +11,7 @@ import { render } from './renderer.js'
 import { pushUndo, delInstance, delEdge } from './editor.js'
 import { save, syncCodeFromRuntime } from './io.js'
 import { propagate } from './engine.js'
-import { esc, isValidIdentifier } from './utils.js'
+import { esc } from './utils.js'
 import { _equal } from './codegraph.js'
 import { showModal } from './input.js'
 
@@ -391,11 +391,11 @@ export async function addProperty() {
     fields: [
       {
         name: 'key',
-        label: '属性名（JS 标识符，不能与现有属性/保留字冲突）',
+        label: '属性名',
         type: 'text',
         default: '',
         validate: v => {
-          if (!isValidIdentifier(v)) return '需为合法 JS 标识符'
+          if (!v.trim()) return '不能为空'
           if (reserved.has(v)) return v + ' 是保留字'
           if (used.has(v)) return '与现有属性冲突'
           return null
