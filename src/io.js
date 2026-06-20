@@ -72,6 +72,8 @@ export function deriveEdges() {
 //   - x/y → visualState.positions[varName]
 //   - properties/inputs/outputs/computed/error → 同 v0.5 语义
 export function wrapInstance(inst) {
+  // __wrapped 守卫:防重复 wrap。runSource 重建 + import/load 多次调用时,
+  // 已 wrap 的实例重复 defineProperty 会 silently 失败或抛错(看 configurable)。
   if (inst.__wrapped) return inst
   Object.defineProperty(inst, '__wrapped', { value: true, enumerable: false })
 

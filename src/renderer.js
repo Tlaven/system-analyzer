@@ -121,8 +121,7 @@ export function render() {
     const isHovered = state.hoverEdge === e.id
     const es = getEdgeStyle(e.relation)
     const es2 = config.edgeStyle
-    // 圆形（minimal）模式下 curve 降级为直线 — 圆心连线硬加曲线只会变形
-    const isCurve = es2 === 'curve' && config.infoLevel !== 'minimal'
+    const isCurve = es2 === 'curve'
     const isHighlighted = isDimmed() && hoverConnectedEdgeIds.has(e.id)
     const ec = isSel ? es.sel : (isHovered ? es.sel : es.color)
     ctx.strokeStyle = ec
@@ -161,10 +160,26 @@ export function render() {
         route = [P1, { x: mx, y: P1.y }, { x: mx, y: P2.y }, P2]
       }
     } else if (isCurve) {
-      // 单段 cubic + 主方向切线 + bulge 避让（不分前向/反向）
       const geo = computeCurveGeometry(s, t, P1, P2)
       if (geo.degrade) curveDegrade = true
-      else curveCubic = geo
+      else {
+        curveCubic = geo
+        // minimal 模式平行边：同对多边沿垂直方向散开
+        if (config.infoLevel === 'minimal') {
+          const pair = _allEdges.filter(ed => ed.source_node === e.source_node && ed.target_node === e.target_node)
+          if (pair.length > 1) {
+            const idx = pair.indexOf(e)
+            const mid = (pair.length - 1) / 2
+            const off = (idx - mid) * 14
+            const nx = -(P2.y - P1.y), ny = (P2.x - P1.x)
+            const nl = Math.hypot(nx, ny) || 1
+            curveCubic.cp1.x += nx / nl * off
+            curveCubic.cp1.y += ny / nl * off
+            curveCubic.cp2.x += nx / nl * off
+            curveCubic.cp2.y += ny / nl * off
+          }
+        }
+      }
     }
 
     if (route) {

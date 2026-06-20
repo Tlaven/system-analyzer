@@ -273,6 +273,61 @@ export function lineHitsRect(x1,y1,x2,y2,r){
 export function computeCurveGeometry(s, t, p1, p2) {
   const dx = p2.x - p1.x, dy = p2.y - p1.y
   const dist = Math.hypot(dx, dy) || 1
+  // 最小模式（圆形）：先找最深遮挡，然后实际采样验证两侧 bulge 是否撞到其他节点
+  //   - 无遮挡 → 直线（degrade:true）
+  //   - 有遮挡 → 先试远离最深障碍的一侧，再试另一侧，采样检测确保有效避让
+  //   - 两侧都撞 → 降级直线
+  if (config.infoLevel === 'minimal') {
+    const nodes = state.nodes
+    // 预算所有节点半径（避免采样循环里反复计算）
+    const radii = new Map()
+    for (const n of nodes) radii.set(n.id, getNodeRadius(n))
+    // 找最深遮挡（只考虑投影落在 P1↔P2 之间的节点，排除源/目标背后）
+    const l2 = dx * dx + dy * dy
+    let deepest = null, maxPen = 0
+    for (const n of nodes) {
+      if (n.id === s.id || n.id === t.id) continue
+      const t_ = ((n.x - p1.x) * dx + (n.y - p1.y) * dy) / l2
+      if (t_ <= 0 || t_ >= 1) continue
+      const d = Math.abs((n.x - p1.x) * dy - (n.y - p1.y) * dx) / dist
+      const margin = radii.get(n.id) + 8
+      if (d >= margin) continue
+      const pen = margin - d
+      if (pen > maxPen) { maxPen = pen; deepest = n }
+    }
+    if (!deepest) return { degrade: true }
+    const off = Math.max(30, Math.min(100, Math.min(dist * 0.5, maxPen * 1.6 + 12)))
+    const npx = -dy / dist, npy = dx / dist
+    // 对给定 bulge 方向采样 cubic，检测是否碰撞其他节点
+    const clear = (dir) => {
+      const c1x = p1.x + dx * 0.35 + npx * dir * off
+      const c1y = p1.y + dy * 0.35 + npy * dir * off
+      const c2x = p2.x - dx * 0.35 + npx * dir * off
+      const c2y = p2.y - dy * 0.35 + npy * dir * off
+      for (let i = 2; i <= 10; i += 2) {
+        const t = i / 10, u = 1 - t
+        const bx = u*u*u*p1.x + 3*u*u*t*c1x + 3*u*t*t*c2x + t*t*t*p2.x
+        const by = u*u*u*p1.y + 3*u*u*t*c1y + 3*u*t*t*c2y + t*t*t*p2.y
+        for (const n of nodes) {
+          if (n.id === s.id || n.id === t.id) continue
+          if (Math.hypot(bx - n.x, by - n.y) < radii.get(n.id) + 8) return false
+        }
+      }
+      return true
+    }
+    // 优先试远离最深障碍的一侧
+    const away = ((deepest.x - p1.x) * dy - (deepest.y - p1.y) * dx) >= 0 ? -1 : 1
+    for (const dir of [away, -away]) {
+      if (clear(dir)) {
+        return {
+          cp1: { x: p1.x + dx * 0.35 + npx * dir * off, y: p1.y + dy * 0.35 + npy * dir * off },
+          cp2: { x: p2.x - dx * 0.35 + npx * dir * off, y: p2.y - dy * 0.35 + npy * dir * off },
+          degrade: false,
+        }
+      }
+    }
+    return { degrade: true }
+  }
   const isHorz = Math.abs(dx) >= Math.abs(dy)
   const dirX = isHorz ? (Math.sign(dx) || 1) : 0
   const dirY = isHorz ? 0 : (Math.sign(dy) || 1)
@@ -403,7 +458,7 @@ export function hitHandle(x, y) {
 }
 export function hitEdge(x, y) {
   const edges = deriveEdges()
-  const isCurveMode = config.edgeStyle === 'curve' && config.infoLevel !== 'minimal'
+  const isCurveMode = config.edgeStyle === 'curve'
   for (let i = edges.length - 1; i >= 0; i--) {
     const e = edges[i], s = state.nodes.find(n => n.id === e.source_node), t = state.nodes.find(n => n.id === e.target_node)
     if (!s || !t) continue

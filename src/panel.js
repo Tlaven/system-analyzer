@@ -281,8 +281,8 @@ function _renderPropField({ propName, cont, inst, cls, codeMode, isType }) {
 
   const t = typeof curVal
   const labelSuffix = isType ? '（默认）' : ''
-  const hasOverride = !isType && inst.attrs[propName] !== undefined
-  const delBtn = (codeMode || !hasOverride) ? '' : '<button class="btn-del-prop" data-prop="' + esc(propName) + '" style="padding:2px 8px;font-size:11px;border:1px solid var(--delbd);background:var(--delb);color:var(--delc);border-radius:4px;cursor:pointer;margin-left:6px">删</button>'
+  const canDel = isType ? (propName in (cls.attrs || {})) : (inst.attrs[propName] !== undefined)
+  const delBtn = (codeMode || !canDel) ? '' : '<button class="btn-del-prop" data-prop="' + esc(propName) + '" style="padding:2px 8px;font-size:11px;border:1px solid var(--delbd);background:var(--delb);color:var(--delc);border-radius:4px;cursor:pointer;margin-left:6px">删</button>'
   if (t === 'number') {
     row.innerHTML = '<span class="fl">' + esc(propName) + esc(labelSuffix) + '</span>' +
       '<div style="display:flex;align-items:center">' +

@@ -112,7 +112,11 @@ function commitCode(code) {
 function showError(msg) {
   const err = document.getElementById('code-panel-error')
   if (err) {
-    err.textContent = '⚠ ' + msg
+    let tip = ''
+    if (msg.includes('Unexpected token')) {
+      tip = '\n\n💡 小提示：检查属性名是否包含 / - . 等特殊字符，需用引号包裹，如 \'变化/周\': 0'
+    }
+    err.textContent = '⚠ ' + msg + tip
     err.classList.remove('hidden')
   }
 }

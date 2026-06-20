@@ -16,8 +16,17 @@ import { splitSource } from './parser.js'
 import { scanClass } from './scanner.js'
 
 // 创建 GraphStarter bridge。add(cls, explicitName) 内部自动生成 varName `<ClassName>_<n>`，
-// 或使用 explicitName。返回 attrs（含不可枚举 __instId 反查），
-// 这样 bootstrap 里 `Source_1.edges = [{ target: Database_1, ... }]` 原生赋值在 attrs 层生效。
+// 或使用 explicitName。
+//
+// 关键 trick:add() 返回 **attrs 对象本身**(不是包装器,不是 RuntimeInstance)。这让
+// `Source_1.edges = [{ target: Database_1, ... }]` 这种原生 JS 赋值直接 mutate `attrs.edges`。
+// 方法体里 `this.edges[i].target.input = ...` 也是直接命中目标 attrs,无需 proxy。
+//
+// attrs 上挂的 `__instId` 必须满足三个条件,改一处都会炸:
+//   1. **不可枚举** — JSON.stringify(attrs) 不会带上它,否则 serializeCode 会循环引用爆栈
+//   2. **writable + configurable** — runSource 重建时要能重新定义
+//   3. **挂在 attrs 上而非 inst 上** — `target` 引用存的是 attrs,反查 `__instId.varName`
+//      才能拿到目标实例身份(deriveEdges / serializeCode 都靠这个反查)
 function makeBridge() {
   const instances = []
   const counters = {}
@@ -79,7 +88,29 @@ export function runSource(sourceCode, state) {
     try {
       cls = new Function('return (' + c.source + ')')()
     } catch (e) {
-      throw new Error(`class ${c.name} 解析失败: ${e.message}`)
+      const lines = c.source.split('\n')
+      const errMsg = e.message
+      let hint = ''
+      let pos = -1
+      const posMatch = errMsg.match(/(?:position|at.*?line)\s*(\d+)/i)
+      if (posMatch) {
+        pos = parseInt(posMatch[1], 10)
+      } else {
+        const anonMatch = errMsg.match(/<anonymous>:(\d+):\d+/)
+        if (anonMatch) pos = parseInt(anonMatch[1], 10)
+      }
+      if (pos > 0 && pos <= lines.length) {
+        hint = '\n  第 ' + pos + ' 行: ' + lines[pos - 1]?.trim()
+      } else {
+        for (let i = 0; i < lines.length; i++) {
+          const trimmed = lines[i].trim()
+          if (trimmed.includes('/') && trimmed.includes(':') && !trimmed.startsWith('//')) {
+            hint = '\n  第 ' + (i + 1) + ' 行: ' + trimmed
+            break
+          }
+        }
+      }
+      throw new Error(`class ${c.name} 解析失败: ${errMsg}` + hint)
     }
     const scan = scanClass(cls, c.source)
     state.classes[c.name] = {
@@ -123,9 +154,11 @@ export function serializeCode(_state) {
     if (cls.name) {
       classLines.push('  name = ' + formatValue(cls.name))
     }
+    // 跳过 `__` 前缀键(内部字段约定,如 __instId)+ edges(实例级,在启动段输出)。
+    // 新增内部字段时,统一用 `__xxx` 前缀,serializeCode 会自动忽略。
     const attrsEntries = Object.entries(cls.attrs || {}).filter(([k]) => !k.startsWith('__') && k !== 'edges')
     const attrsLiteral = attrsEntries.length
-      ? '{\n' + attrsEntries.map(([k, v]) => '    ' + k + ': ' + formatValue(v)).join(',\n') + '\n  }'
+      ? '{\n' + attrsEntries.map(([k, v]) => '    ' + (isValidIdentifier(k) ? k : quoteKey(k)) + ': ' + formatValue(v)).join(',\n') + '\n  }'
       : '{}'
     classLines.push('  attrs = ' + attrsLiteral)
     classLines.push('}')
@@ -149,7 +182,8 @@ export function serializeCode(_state) {
       const curVal = inst.attrs[key]
       const defaultVal = clsAttrs[key]
       if (!_equal(defaultVal, curVal)) {
-        bootLines.push(inst.varName + '.' + key + ' = ' + formatValue(curVal))
+        const keyExpr = isValidIdentifier(key) ? '.' + key : '[' + quoteKey(key) + ']'
+        bootLines.push(inst.varName + keyExpr + ' = ' + formatValue(curVal))
       }
     }
 
@@ -180,12 +214,25 @@ export function resetRuntime(state) {
   runSource(state.sourceCode, state)
 }
 
+// 用于检测实例 override:属性值跟 class 默认是否相等(相等就不输出 override 行)。
+// 用 JSON.stringify 比对象有两个边界要注意:
+//   - 键序敏感:`{a:1,b:2}` ≠ `{b:2,a:1}`(实际场景里同一赋值路径不会乱序,但不保证)
+//   - `undefined` 会被 JSON 丢弃:`{a:undefined}` 序列化成 `{}`,跟 `{}` 相等
+// 实际场景下基本准,但加新属性类型(如 Symbol / 函数)时要想到这里的近似性。
 export function _equal(a, b) {
   if (a === b) return true
   if (a === null || b === null) return false
   if (typeof a !== typeof b) return false
   if (typeof a === 'object') return JSON.stringify(a) === JSON.stringify(b)
   return false
+}
+
+function isValidIdentifier(str) {
+  return /^[$_\p{L}][$_\p{L}\d]*$/u.test(str)
+}
+
+function quoteKey(k) {
+  return "'" + k.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"
 }
 
 export function formatValue(v) {
