@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.12] - 2026-06-25
+
 ### Added
 
 - Transform autocomplete:边面板输入 `source['` / `target['` 时弹当前节点 key 列表(↑↓ 选、Enter/Tab 插入、Esc 关闭)。保留 v0.11 focus 契约(原地更新 `#ep-terr`,不重建 panel body)
@@ -12,6 +14,10 @@
 ### Changed
 
 - 抽取 `getInstanceAttrKeys` utility(新建 `src/attrkeys.js`),替换 panel.js / codegraph.js 共 4 处重复 attrs key 过滤。单独建文件而非放 utils.js,避免 codegraph.js → utils.js → io.js 把 Node 测试环境拉进 IO bundle,保持 codegraph.js 的 Node-runnable pure engine 边界
+
+### Removed
+
+- GitHub Actions CI workflow(`.github/workflows/test.yml`)—— 账户 billing 锁定导致 workflow 无法运行,移除避免误导(v0.11 引入)
 
 ## [0.11] - 2026-06-24
 
