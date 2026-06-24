@@ -109,4 +109,4 @@ URL hash 分享 = base64 编码 sourceCode(UTF-8 safe),上限 24000 字符。
 
 ## License
 
-(待定——上传 GitHub 前可以加 LICENSE 文件)
+[MIT](LICENSE) © Tlaven
