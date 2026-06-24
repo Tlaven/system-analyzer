@@ -162,7 +162,20 @@ export function wrapInstance(inst) {
     enumerable: false, configurable: true,
   })
   Object.defineProperty(inst, 'error', {
-    get() { return inst._topoError || inst._execError || null },
+    get() {
+      if (inst._topoError) return inst._topoError
+      if (inst._execError) return inst._execError
+      // v0.11: 聚合本节点所有 transform 边错误(每条边各报各的,不再 last-edge-wins)
+      const edges = Array.isArray(inst.attrs.edges) ? inst.attrs.edges : []
+      const edgeErrs = []
+      for (const e of edges) {
+        if (e && e._transformError) {
+          const tgtVar = (e.target && e.target.__instId && e.target.__instId.varName) || '?'
+          edgeErrs.push('→' + tgtVar + ': ' + e._transformError)
+        }
+      }
+      return edgeErrs.length ? edgeErrs.join('; ') : null
+    },
     set(v) { inst._execError = v },
     enumerable: false, configurable: true,
   })

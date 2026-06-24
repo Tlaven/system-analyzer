@@ -79,7 +79,10 @@ Processor_1.edges = [
 ]
 Source_1.rate = 5`
 
-const browser = await puppeteer.launch({ headless: 'new' })
+const browser = await puppeteer.launch({
+  headless: 'new',
+  args: process.env.CI ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
+})
 const page = await browser.newPage()
 
 page.on('console', msg => console.log('  [browser console]', msg.text()))
@@ -730,6 +733,100 @@ console.log('\n测试 25：infoLevel 切换 → 形状随之变（无 nodeShape�
   })
   check('config 不含 nodeShape', stats.noNodeShape === true, stats.noNodeShape)
   check('sel-shape 元素已删除', stats.noSelShapeEl === true, stats.noSelShapeEl)
+}
+
+console.log('\n测试 26：transform 抛错时边面板显示错误（v0.11 ADR-003 DX）')
+{
+  const result = await page.evaluate(() => {
+    const src = `class Src26 {
+  description = "源"
+  attrs = { x: 10 }
+}
+class Tgt26 {
+  description = "目标"
+  attrs = { y: 0 }
+}
+const Src26_1 = GraphStarter.add(Src26)
+const Tgt26_1 = GraphStarter.add(Tgt26)
+Src26_1.edges = [{ target: Tgt26_1, description: '边26', transform: "target['y'] = 1" }]`
+    window.__testImport({ sourceCode: src, title: 't26' })
+
+    window.showEdgePanel('Src26_1>Tgt26_1>0')
+
+    const ta = document.getElementById('ep-transform')
+    ta.value = "throw new Error('boom26')"
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+
+    const errEl = document.getElementById('ep-terr')
+    return {
+      errElExists: !!errEl,
+      textContent: errEl ? errEl.textContent : null,
+      display: errEl ? errEl.style.display : null,
+    }
+  })
+  check('#ep-terr 元素存在', result.errElExists === true)
+  check('错误文本含 boom26', !!(result.textContent && result.textContent.includes('boom26')), result.textContent)
+  check('错误 div 可见', result.display !== 'none', result.display)
+}
+
+console.log('\n测试 27：修复 transform 后错误清除')
+{
+  const result = await page.evaluate(() => {
+    const ta = document.getElementById('ep-transform')
+    ta.value = "target['y'] = source['x'] * 2"
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+
+    const errEl = document.getElementById('ep-terr')
+    const srcInst = window.state.runtimeInstances.find(i => i.varName === 'Src26_1')
+    const tgtInst = window.state.runtimeInstances.find(i => i.varName === 'Tgt26_1')
+    return {
+      display: errEl ? errEl.style.display : null,
+      textContent: errEl ? errEl.textContent : null,
+      edgeErr: srcInst.attrs.edges[0]._transformError,
+      tgtY: tgtInst.attrs.y,
+    }
+  })
+  check('错误 div 隐藏', result.display === 'none', result.display)
+  check('边 _transformError 清空', result.edgeErr === null, result.edgeErr)
+  check('transform 正确执行(y=20)', result.tgtY === 20, result.tgtY)
+}
+
+console.log('\n测试 28：multi-edge 源节点各边独立错误（last-edge-wins 回归守卫）')
+{
+  const result = await page.evaluate(() => {
+    const src = `class Src28 {
+  description = "源"
+  attrs = { x: 1 }
+}
+class T28a {
+  description = "目标A"
+  attrs = { v: 0 }
+}
+class T28b {
+  description = "目标B"
+  attrs = { v: 0 }
+}
+const Src28_1 = GraphStarter.add(Src28)
+const T28a_1 = GraphStarter.add(T28a)
+const T28b_1 = GraphStarter.add(T28b)
+Src28_1.edges = [
+  { target: T28a_1, description: 'a', transform: "throw new Error('errA')" },
+  { target: T28b_1, description: 'b', transform: "throw new Error('errB')" }
+]`
+    window.__testImport({ sourceCode: src, title: 't28' })
+
+    window.runTransforms()
+
+    const srcInst = window.state.runtimeInstances.find(i => i.varName === 'Src28_1')
+    return {
+      err0: srcInst.attrs.edges[0]._transformError,
+      err1: srcInst.attrs.edges[1]._transformError,
+      instExecErr: srcInst._execError,
+    }
+  })
+  check('edges[0] 报 errA', !!(result.err0 && result.err0.includes('errA')), result.err0)
+  check('edges[1] 报 errB', !!(result.err1 && result.err1.includes('errB')), result.err1)
+  check('源 inst._execError 未被污染', result.instExecErr === null || result.instExecErr === undefined, result.instExecErr)
 }
 
 await browser.close()

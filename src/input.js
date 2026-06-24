@@ -8,7 +8,7 @@ import { toggleCodeView, commitCodeNow, setCodeViewReadOnly } from './codeview.j
 import { loadConfig, saveConfig, applyTheme } from './config.js'
 import { showNodePanel, showEdgePanel } from './panel.js'
 import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName } from './utils.js'
-import { stepAll, propagate } from './engine.js'
+import { stepAll, propagate, runTransforms } from './engine.js'
 import { splitSource } from './parser.js'
 import { runSource, _equal, formatValue } from './codegraph.js'
 
@@ -23,6 +23,7 @@ window.setEditMode = setEditMode
 window.selectEdge = selectEdge
 window.wrapInstance = wrapInstance
 window.showNodePanel = showNodePanel
+window.showEdgePanel = showEdgePanel
 window.runSource = runSource
 window.syncCodeFromRuntime = syncCodeFromRuntime
 
@@ -44,6 +45,7 @@ window.toggleCodeView = toggleCodeView
 window.commitCodeNow = commitCodeNow
 window.stepOnce = stepAll
 window.stepAll = stepAll
+window.runTransforms = runTransforms
 window.setExecMode = function(val) {
   config.execMode = val; saveConfig()
   const stepBtn = document.getElementById('step-btn')

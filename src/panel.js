@@ -138,6 +138,10 @@ export function showEdgePanel(edgeId) {
     '<span class="fl">transform(JS 语句片段,用 source[\'k\'] / target[\'k\'] 访问)</span>' +
     '<textarea id="ep-transform"' + (codeMode ? ' disabled' : '') + ' placeholder="target[\'Y\'] = source[\'X\'] * 0.02" style="font-family:monospace;font-size:12px;min-height:80px">' + esc(transform) + '</textarea>' +
     '</div>'
+  // v0.11: transform 错误显示区(无条件渲染,oninput 时原地更新避免丢 textarea focus)
+  const terr = edge._transformError
+  const terrStyle = 'color:#e53935;font-family:monospace;font-size:11px;white-space:pre-wrap;margin-top:4px' + (terr ? '' : ';display:none')
+  html += '<div id="ep-terr" style="' + terrStyle + '">' + (terr ? '⚠ ' + esc(terr) : '') + '</div>'
 
   if (!codeMode) {
     html += '<button class="btn-del" onclick="delCurrentEdge()" style="margin-top:8px">删除边</button>'
@@ -163,6 +167,18 @@ export function showEdgePanel(edgeId) {
         syncCodeFromRuntime()
         // 立即重算 transform(绕过 execMode,ADR-003 OQ#2:transform 像 Excel formula)
         runTransforms()
+        // v0.11: 原地更新错误显示(不 re-render panel,保留 textarea focus + 光标位置)
+        const errEl = document.getElementById('ep-terr')
+        if (errEl) {
+          const msg = edge._transformError
+          if (msg) {
+            errEl.textContent = '⚠ ' + msg
+            errEl.style.display = ''
+          } else {
+            errEl.style.display = 'none'
+            errEl.textContent = ''
+          }
+        }
       }
     }
     window.delCurrentEdge = function() {
