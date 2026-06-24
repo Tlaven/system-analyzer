@@ -162,25 +162,8 @@ export function showEdgePanel(edgeId) {
     }
     const transformEl = document.getElementById('ep-transform')
     if (transformEl) {
-      transformEl.oninput = function() {
-        if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
-        edge.transform = this.value
-        syncCodeFromRuntime()
-        // 立即重算 transform(绕过 execMode,ADR-003 OQ#2:transform 像 Excel formula)
-        runTransforms()
-        // v0.11: 原地更新错误显示(不 re-render panel,保留 textarea focus + 光标位置)
-        const errEl = document.getElementById('ep-terr')
-        if (errEl) {
-          const msg = edge._transformError
-          if (msg) {
-            errEl.textContent = '⚠ ' + msg
-            errEl.style.display = ''
-          } else {
-            errEl.style.display = 'none'
-            errEl.textContent = ''
-          }
-        }
-      }
+      transformEl.oninput = () => _onTransformInput(transformEl, edge)
+      _attachTransformAutocomplete(transformEl, edge, srcInst, tgtInst)
     }
     window.delCurrentEdge = function() {
       if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
@@ -192,6 +175,202 @@ export function showEdgePanel(edgeId) {
   }
 }
 window.showEdgePanel = showEdgePanel
+
+// v0.12: transform oninput handler(autocomplete 插入后复用,保证与手敲行为一致)
+// v0.11 focus 契约:原地更新 #ep-terr,不 re-render panel,保留 textarea focus + 光标
+function _onTransformInput(textarea, edge) {
+  if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+  edge.transform = textarea.value
+  syncCodeFromRuntime()
+  // 立即重算 transform(绕过 execMode,ADR-003 OQ#2:transform 像 Excel formula)
+  runTransforms()
+  // v0.11: 原地更新错误显示
+  const errEl = document.getElementById('ep-terr')
+  if (errEl) {
+    const msg = edge._transformError
+    if (msg) {
+      errEl.textContent = '⚠ ' + msg
+      errEl.style.display = ''
+    } else {
+      errEl.style.display = 'none'
+      errEl.textContent = ''
+    }
+  }
+}
+
+// v0.12: transform autocomplete —— 用户输入 source[' / target[' 时弹 key 列表
+// 设计:保留原生 textarea(不换 CodeMirror),自写轻量 popup;popup + mirror 挂 panelBody 内
+// 随 innerHTML 重建销毁(0 泄漏);坐标用 mirror div 测量 + getBoundingClientRect 差值
+function _attachTransformAutocomplete(textarea, edge, srcInst, tgtInst) {
+  if (state.editMode === 'code') return  // Code 模式 textarea disabled
+
+  let popup = null
+  let mirror = null
+  let candidates = []
+  let selectedIdx = 0
+  let open = false
+
+  // 检测光标位置:在 source[' 或 target[' 内则返回 {which, partial, startPos};否则 null
+  function detectTrigger() {
+    const caret = textarea.selectionStart
+    const before = textarea.value.slice(0, caret)
+    const m = before.match(/(source|target)\s*\[\s*['"]([^'"\[]*)$/)
+    if (!m) return null
+    const partial = m[2]
+    return {
+      which: m[1],
+      partial: partial,
+      startPos: caret - partial.length,
+    }
+  }
+
+  function buildCandidates(which, partial) {
+    const inst = which === 'source' ? srcInst : tgtInst
+    return getInstanceAttrKeys(inst, { excludeMeta: true }).filter(k => k.startsWith(partial))
+  }
+
+  function ensureMirror() {
+    if (mirror && mirror.parentNode) return mirror
+    mirror = document.createElement('div')
+    mirror.id = 'ep-transform-mirror'
+    const cs = getComputedStyle(textarea)
+    mirror.style.position = 'absolute'
+    mirror.style.visibility = 'hidden'
+    mirror.style.top = '0'
+    mirror.style.left = '0'
+    mirror.style.whiteSpace = 'pre-wrap'
+    mirror.style.wordWrap = 'break-word'
+    mirror.style.fontFamily = cs.fontFamily
+    mirror.style.fontSize = cs.fontSize
+    mirror.style.lineHeight = cs.lineHeight
+    mirror.style.padding = cs.padding
+    mirror.style.border = cs.border
+    mirror.style.boxSizing = cs.boxSizing
+    mirror.style.width = textarea.clientWidth + 'px'
+    panelBody.appendChild(mirror)
+    return mirror
+  }
+
+  function getCaretCoords() {
+    const m = ensureMirror()
+    m.textContent = ''
+    m.appendChild(document.createTextNode(textarea.value.slice(0, textarea.selectionStart)))
+    const marker = document.createElement('span')
+    marker.textContent = '​'
+    m.appendChild(marker)
+    const panelRect = panel.getBoundingClientRect()
+    const taRect = textarea.getBoundingClientRect()
+    const cs = getComputedStyle(textarea)
+    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) || 16
+    return {
+      x: (taRect.left - panelRect.left) + marker.offsetLeft,
+      y: (taRect.top - panelRect.top) + marker.offsetTop + lineHeight + 2,
+    }
+  }
+
+  function closePopup() {
+    if (popup) { popup.remove(); popup = null }
+    if (mirror) { mirror.remove(); mirror = null }
+    open = false
+    candidates = []
+    selectedIdx = 0
+  }
+
+  function renderPopup(trigger) {
+    candidates = buildCandidates(trigger.which, trigger.partial)
+    if (!candidates.length) { closePopup(); return }
+    if (!popup) {
+      popup = document.createElement('div')
+      popup.id = 'ep-ac-popup'
+      popup.addEventListener('mousedown', e => e.preventDefault())  // 阻止 textarea 失焦
+      panelBody.appendChild(popup)
+    }
+    selectedIdx = 0
+    popup.innerHTML = candidates.map((k, i) =>
+      '<div class="ep-ac-item' + (i === 0 ? ' sel' : '') + '" data-idx="' + i + '">' + esc(k) + '</div>'
+    ).join('')
+    Array.from(popup.querySelectorAll('.ep-ac-item')).forEach((el, i) => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault()
+        selectedIdx = i
+        insertSelected()
+      })
+    })
+    const coords = getCaretCoords()
+    popup.style.left = coords.x + 'px'
+    popup.style.top = coords.y + 'px'
+    open = true
+  }
+
+  function moveSel(delta) {
+    if (!candidates.length) return
+    selectedIdx = (selectedIdx + delta + candidates.length) % candidates.length
+    Array.from(popup.children).forEach((el, i) => {
+      el.classList.toggle('sel', i === selectedIdx)
+    })
+    const sel = popup.children[selectedIdx]
+    if (sel) sel.scrollIntoView({ block: 'nearest' })
+  }
+
+  function insertSelected() {
+    if (!open || !candidates.length) { closePopup(); return }
+    const trigger = detectTrigger()
+    if (!trigger) { closePopup(); return }
+    const key = candidates[selectedIdx]
+    const caret = textarea.selectionStart
+    textarea.value = textarea.value.slice(0, trigger.startPos) + key + "']" + textarea.value.slice(caret)
+    const newCaret = trigger.startPos + key.length + 2  // 跳过 key + ']
+    textarea.setSelectionRange(newCaret, newCaret)
+    closePopup()
+    _onTransformInput(textarea, edge)  // 与手敲走同一路径:runTransforms + 原地错误更新
+  }
+
+  function refresh() {
+    const trigger = detectTrigger()
+    if (!trigger) { closePopup(); return }
+    if (open) {
+      // popup 已开,只刷新候选(保留选中索引到合法范围)
+      const next = buildCandidates(trigger.which, trigger.partial)
+      if (!next.length) { closePopup(); return }
+      candidates = next
+      if (selectedIdx >= candidates.length) selectedIdx = 0
+      if (popup) {
+        popup.innerHTML = candidates.map((k, i) =>
+          '<div class="ep-ac-item' + (i === selectedIdx ? ' sel' : '') + '" data-idx="' + i + '">' + esc(k) + '</div>'
+        ).join('')
+        Array.from(popup.querySelectorAll('.ep-ac-item')).forEach((el, i) => {
+          el.addEventListener('mousedown', e => {
+            e.preventDefault()
+            selectedIdx = i
+            insertSelected()
+          })
+        })
+        const coords = getCaretCoords()
+        popup.style.left = coords.x + 'px'
+        popup.style.top = coords.y + 'px'
+      }
+    } else {
+      renderPopup(trigger)
+    }
+  }
+
+  textarea.addEventListener('input', refresh)
+  textarea.addEventListener('click', refresh)
+  textarea.addEventListener('keydown', e => {
+    if (!open) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveSel(1) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveSel(-1) }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertSelected() }
+    else if (e.key === 'Escape') { e.preventDefault(); closePopup() }
+  })
+  textarea.addEventListener('blur', () => setTimeout(closePopup, 150))
+
+  window.__epAutocompleteState = () => ({
+    open,
+    candidates: candidates.slice(),
+    selected: selectedIdx,
+  })
+}
 
 // ============ Instance/Type Panel ============
 export function showNodePanel(inst, highlightRef) {

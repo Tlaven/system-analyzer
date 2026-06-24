@@ -100,6 +100,7 @@ class Processor {
 - **多语句合法**:`if (source['库存'] < source['阈值']) target['饥饿'] = true`
 - 跟方法体一样,transform 内禁止 `import` / `require` / `fetch` / `XMLHttpRequest` / `eval`(文档约定,无运行时强制)
 - 无 transform 的边是纯结构边,不保留任何隐式"默认流动"
+- **UI autocomplete 提示**:边面板里写 transform 时,输入 `source['` 或 `target['` 会弹出当前 source/target 节点的 key 列表(↑↓ 选、Enter/Tab 插入、Esc 关闭),不必反复看面板上方的"属性引用提示"
 
 ## 你的核心任务
 

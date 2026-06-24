@@ -6,6 +6,17 @@
 
 ### Added
 
+- Transform autocomplete:边面板输入 `source['` / `target['` 时弹当前节点 key 列表(↑↓ 选、Enter/Tab 插入、Esc 关闭)。保留 v0.11 focus 契约(原地更新 `#ep-terr`,不重建 panel body)
+- 6 个 e2e 测试(测试 29-34):autocomplete 弹列表 / 键盘 nav / Enter 插入 / Esc 关闭 / 候选过滤 / v0.11 focus 契约守卫
+
+### Changed
+
+- 抽取 `getInstanceAttrKeys` utility(新建 `src/attrkeys.js`),替换 panel.js / codegraph.js 共 4 处重复 attrs key 过滤。单独建文件而非放 utils.js,避免 codegraph.js → utils.js → io.js 把 Node 测试环境拉进 IO bundle,保持 codegraph.js 的 Node-runnable pure engine 边界
+
+## [0.11] - 2026-06-24
+
+### Added
+
 - GitHub Actions CI workflow(`.github/workflows/test.yml`)—— push/PR 自动跑 3 套测试
 - Transform 表达式错误显示在边面板(`#ep-terr` 区域)—— 用户写 transform 的地方直接看到表达式哪里坏了
 - `runTransforms` 暴露到 `window`(供 e2e 测试调用)

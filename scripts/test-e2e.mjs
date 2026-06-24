@@ -829,6 +829,145 @@ Src28_1.edges = [
   check('源 inst._execError 未被污染', result.instExecErr === null || result.instExecErr === undefined, result.instExecErr)
 }
 
+console.log('\n测试 29：输入 source[\' 弹出 key 列表(v0.12 transform autocomplete)')
+{
+  const result = await page.evaluate(() => {
+    const src = `class Src29 {
+  description = "源"
+  attrs = { rate: 1, value: 100, name: '元字段' }
+}
+class Tgt29 {
+  description = "目标"
+  attrs = { y: 0 }
+}
+const Src29_1 = GraphStarter.add(Src29)
+const Tgt29_1 = GraphStarter.add(Tgt29)
+Src29_1.edges = [{ target: Tgt29_1, description: '边29' }]`
+    window.__testImport({ sourceCode: src, title: 't29' })
+    window.showEdgePanel('Src29_1>Tgt29_1>0')
+    const ta = document.getElementById('ep-transform')
+    ta.focus()
+    ta.value = "source['"
+    ta.setSelectionRange(8, 8)
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    const s = window.__epAutocompleteState()
+    return {
+      open: s.open,
+      candidates: s.candidates,
+    }
+  })
+  check('popup 打开', result.open === true)
+  check('候选含 rate', result.candidates.includes('rate'))
+  check('候选含 value', result.candidates.includes('value'))
+  check('排除 name(excludeMeta 生效)', !result.candidates.includes('name'), JSON.stringify(result.candidates))
+  check('排除 description', !result.candidates.includes('description'))
+}
+
+console.log('\n测试 30：↑↓ 键盘导航 popup')
+{
+  const result = await page.evaluate(() => {
+    const ta = document.getElementById('ep-transform')
+    const s1 = window.__epAutocompleteState().selected
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    const s2 = window.__epAutocompleteState().selected
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    const s3 = window.__epAutocompleteState().selected
+    const count = window.__epAutocompleteState().candidates.length
+    return { s1, s2, s3, count }
+  })
+  check('初始选中 = 0', result.s1 === 0)
+  check('ArrowDown → 1', result.s2 === 1, result.s2)
+  check('ArrowUp 回到 0', result.s3 === 0, result.s3)
+  check('候选数 = 2(rate + value)', result.count === 2, result.count)
+}
+
+console.log('\n测试 31：Enter 插入选中 key')
+{
+  const result = await page.evaluate(() => {
+    const ta = document.getElementById('ep-transform')
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))  // sel 0→1 → value
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    const srcInst = window.state.runtimeInstances.find(i => i.varName === 'Src29_1')
+    return {
+      value: ta.value,
+      caret: ta.selectionStart,
+      edgeTransform: srcInst.attrs.edges[0].transform,
+      popupOpen: window.__epAutocompleteState().open,
+    }
+  })
+  check("textarea 含 source['value']", result.value.includes("source['value']"), result.value)
+  check('光标在 ] 后(末尾)', result.caret === result.value.length, result.caret)
+  check('edge.transform 已持久化', result.edgeTransform === result.value, result.edgeTransform)
+  check('popup 关闭', result.popupOpen === false)
+}
+
+console.log('\n测试 32：Esc 关闭 popup,内容不变,focus 保留')
+{
+  const result = await page.evaluate(() => {
+    const ta = document.getElementById('ep-transform')
+    ta.value = "target['"
+    ta.setSelectionRange(8, 8)
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    const opened = window.__epAutocompleteState().open
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    return {
+      openedAfterInput: opened,
+      closedAfterEsc: window.__epAutocompleteState().open === false,
+      valueAfterEsc: ta.value,
+      activeIsTextarea: document.activeElement === ta,
+    }
+  })
+  check("target[ 触发 popup", result.openedAfterInput === true)
+  check('Esc 关闭 popup', result.closedAfterEsc === true)
+  check('Esc 不改 textarea 内容', result.valueAfterEsc === "target['", result.valueAfterEsc)
+  check('focus 仍在 textarea', result.activeIsTextarea === true)
+}
+
+console.log('\n测试 33：候选过滤(输入部分 key)')
+{
+  const result = await page.evaluate(() => {
+    const ta = document.getElementById('ep-transform')
+    ta.value = "source['ra"
+    ta.setSelectionRange(11, 11)
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    const s1 = window.__epAutocompleteState()
+    ta.value = "source['xyz"
+    ta.setSelectionRange(12, 12)
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    const s2 = window.__epAutocompleteState()
+    return { candidatesRa: s1.candidates, openRa: s1.open, openXyz: s2.open }
+  })
+  check("'ra' 过滤到 ['rate']", JSON.stringify(result.candidatesRa) === JSON.stringify(['rate']), JSON.stringify(result.candidatesRa))
+  check("'ra' popup 打开", result.openRa === true)
+  check("'xyz' 无匹配 popup 关闭", result.openXyz === false)
+}
+
+console.log('\n测试 34：v0.11 focus 契约守卫(autocomplete 操作不重建 panel)')
+{
+  const result = await page.evaluate(() => {
+    const ta = document.getElementById('ep-transform')
+    const taRefBefore = document.getElementById('ep-transform')
+    ta.value = "source['va"
+    ta.setSelectionRange(11, 11)
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    const taRefAfter = document.getElementById('ep-transform')
+    const errEl = document.getElementById('ep-terr')
+    return {
+      value: ta.value,
+      caret: ta.selectionStart,
+      activeIsTextarea: document.activeElement === ta,
+      taRefUnchanged: taRefBefore === taRefAfter,
+      errElExists: !!errEl,
+    }
+  })
+  check("插入 source['value']", result.value.includes("source['value']"), result.value)
+  check('光标在 ] 后(末尾)', result.caret === result.value.length, result.caret)
+  check('focus 仍在 textarea', result.activeIsTextarea === true)
+  check('textarea DOM 引用未变(innerHTML 未重建)', result.taRefUnchanged === true)
+  check('#ep-terr 仍存在(原地更新机制)', result.errElExists === true)
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

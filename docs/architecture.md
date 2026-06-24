@@ -143,7 +143,7 @@ Panel 顶部 `[ 类型 | 实例 ]` 切换:
 
 ### selEdge 存 id 字符串
 
-`state.selEdge` 是 `<srcVar>><tgtVar>>idx` 字符串而非对象引用,活过 `runSource` 重建。点击画布边 = `selectEdge(ed)` + 弹独立边 panel(`showEdgePanel(edgeId)`,ADR-003 OQ#1,跟节点 panel 平级)。Code 模式下"+ 加边"按钮不显示,边 panel 仅查看(transform textarea disabled)。
+`state.selEdge` 是 `<srcVar>><tgtVar>>idx` 字符串而非对象引用,活过 `runSource` 重建。点击画布边 = `selectEdge(ed)` + 弹独立边 panel(`showEdgePanel(edgeId)`,ADR-003 OQ#1,跟节点 panel 平级)。Code 模式下"+ 加边"按钮不显示,边 panel 仅查看(transform textarea disabled)。transform textarea 输入 `source['` / `target['` 时弹 key 自动补全(v0.12):↑↓ 选、Enter/Tab 插入、Esc 关闭,插入走 `_onTransformInput` 与手敲同路径,保留 v0.11 focus 契约(原地更新 `#ep-terr`,不重建 panel body)。
 
 ### 拖边交互(v0.9 选中后显示拖柄)
 
