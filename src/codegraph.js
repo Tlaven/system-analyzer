@@ -14,6 +14,7 @@
 
 import { splitSource } from './parser.js'
 import { scanClass } from './scanner.js'
+import { getInstanceAttrKeys } from './attrkeys.js'
 
 // 创建 GraphStarter bridge。add(cls, explicitName) 内部自动生成 varName `<ClassName>_<n>`，
 // 或使用 explicitName。
@@ -156,7 +157,7 @@ export function serializeCode(_state) {
     }
     // 跳过 `__` 前缀键(内部字段约定,如 __instId)+ edges(实例级,在启动段输出)。
     // 新增内部字段时,统一用 `__xxx` 前缀,serializeCode 会自动忽略。
-    const attrsEntries = Object.entries(cls.attrs || {}).filter(([k]) => !k.startsWith('__') && k !== 'edges')
+    const attrsEntries = getInstanceAttrKeys(cls).map(k => [k, (cls.attrs || {})[k]])
     const attrsLiteral = attrsEntries.length
       ? '{\n' + attrsEntries.map(([k, v]) => '    ' + (isValidIdentifier(k) ? k : quoteKey(k)) + ': ' + formatValue(v)).join(',\n') + '\n  }'
       : '{}'
@@ -176,9 +177,7 @@ export function serializeCode(_state) {
     const cls = state.classes[inst.className]
     const clsAttrs = (cls && cls.attrs) || {}
 
-    for (const key of Object.keys(inst.attrs)) {
-      if (key.startsWith('__')) continue
-      if (key === 'edges') continue   // edges 单独处理（下方）
+    for (const key of getInstanceAttrKeys(inst)) {
       const curVal = inst.attrs[key]
       const defaultVal = clsAttrs[key]
       if (!_equal(defaultVal, curVal)) {

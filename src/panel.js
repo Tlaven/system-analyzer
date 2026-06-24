@@ -12,6 +12,7 @@ import { pushUndo, delInstance, delEdge } from './editor.js'
 import { save, syncCodeFromRuntime } from './io.js'
 import { propagate, runTransforms } from './engine.js'
 import { esc } from './utils.js'
+import { getInstanceAttrKeys } from './attrkeys.js'
 import { _equal } from './codegraph.js'
 import { showModal } from './input.js'
 
@@ -127,8 +128,8 @@ export function showEdgePanel(edgeId) {
     '<input type="text" id="ep-desc" value="' + esc(desc) + '"' + (codeMode ? ' disabled' : '') + '>' +
     '</div>'
 
-  const srcKeys = Object.keys(srcInst.attrs).filter(k => !k.startsWith('__') && k !== 'edges' && k !== 'name' && k !== 'description')
-  const tgtKeys = Object.keys(tgtInst.attrs).filter(k => !k.startsWith('__') && k !== 'edges' && k !== 'name' && k !== 'description')
+  const srcKeys = getInstanceAttrKeys(srcInst, { excludeMeta: true })
+  const tgtKeys = getInstanceAttrKeys(tgtInst, { excludeMeta: true })
   html += '<div class="prop-title" style="margin-top:8px">属性引用提示（照抄 key 名）</div>'
   html += '<div class="panel-hint" style="font-size:11px;color:var(--flbl);margin:4px 0;font-family:monospace">source: ' + (srcKeys.length ? srcKeys.map(esc).join(' | ') : '(无)') + '</div>'
   html += '<div class="panel-hint" style="font-size:11px;color:var(--flbl);margin:4px 0;font-family:monospace">target: ' + (tgtKeys.length ? tgtKeys.map(esc).join(' | ') : '(无)') + '</div>'
@@ -291,10 +292,10 @@ export function showNodePanel(inst, highlightRef) {
     const cont = document.getElementById('props-cont')
     // 合并键并集：类型模式只看 cls.attrs；实例模式看 cls.attrs + inst.attrs
     const allKeys = isType
-      ? Object.keys(cls.attrs || {}).filter(k => !k.startsWith('__') && k !== 'edges')
+      ? getInstanceAttrKeys(cls)
       : [...new Set([
-          ...Object.keys(cls.attrs || {}).filter(k => !k.startsWith('__') && k !== 'edges'),
-          ...Object.keys(inst.attrs).filter(k => !k.startsWith('__') && k !== 'edges'),
+          ...getInstanceAttrKeys(cls),
+          ...getInstanceAttrKeys(inst),
         ])]
     for (const propName of allKeys) {
       if (propName === 'name' || propName === 'description') continue
