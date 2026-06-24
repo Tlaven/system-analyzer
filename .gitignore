@@ -1,4 +1,22 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs & temp
 *.log
+*.tmp
+
+# Local backups (not for version control)
+index(original).html
