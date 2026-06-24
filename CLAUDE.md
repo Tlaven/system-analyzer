@@ -8,9 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **典型场景:** 用户和 AI 聊到某个复杂系统(一款游戏的经济循环、一个团队的协作关系、一个 SaaS 的增长模型),AI 识别"这里需要可视化",自己 fetch 工具的 `/llms.txt`,按格式生成 graph 数据,编码到 URL hash,输出链接。用户点开看到 graph,可以拖拽微调、保存、分享。
 
-**做什么:** 节点 + 边 + 属性的可视化编辑,支持 UI 拖拽编辑和 Code 代码编辑双模式,Canvas 渲染(三档信息密度 + 多种布线 + 多种布局)。
+**做什么:** 节点 + 边 + 属性的可视化编辑,支持 UI 拖拽编辑和 Code 代码编辑双模式,边级 transform 表达式(轻量响应式——改上游 attr 自动重算下游),Canvas 渲染(三档信息密度 + 多种布线 + 多种布局)。
 
-**不做什么:** 不做后端服务(纯静态单文件);不做用户系统(无登录无云端同步,localStorage + URL hash 分享);不做实时多人协作;不做时序动画(执行引擎的 step 留作未来 Code 模式 AI 实现方法体后激活)。
+**不做什么:** 不做后端服务(纯静态单文件);不做用户系统(无登录无云端同步,localStorage + URL hash 分享);不做实时多人协作;不做时序动画(执行引擎的 step 推进保持不激活,但单次重算通过 `propagate` / `evalTransforms` 走响应式路径)。
 
 ## [为什么] — 设计哲学
 
@@ -44,7 +44,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 
 > **详见 [docs/architecture.md](docs/architecture.md)(L2 架构层)** —— 模块清单、双模式编辑 + 实例级 edges 模型、主流程叙述、关键架构决策、架构级不变量。
 
-一句话概要:sourceCode 字符串 → `runSource` 派生 runtimeInstances → `deriveEdges` 派生边视图 → Canvas 渲染。UI 模式 panel 编辑可双向同步回 sourceCode;Code 模式 codeview 编辑触发 `runSource` 重建。
+一句话概要:sourceCode 字符串 → `runSource` 派生 runtimeInstances → `deriveEdges` 派生边视图 → Canvas 渲染;边上有 transform 时 `evalTransforms` 在渲染前求值(`propagate` / `runTransforms` 两个入口)。UI 模式 panel 编辑可双向同步回 sourceCode;Code 模式 codeview 编辑触发 `runSource` 重建。
 
 ---
 
@@ -104,6 +104,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 - **v0.9 scanner 读 `new cls()` 实例上的 3 个 class field**(description / name / attrs)。**不再**扫 `static edges = [...]` 字面量;**不再**扫 constructor 字段;**不再**扫 class.edges(v0.8 残留);scanner 还会从 attrs 里过滤掉误写的 `edges` 键。
 - **边是实例级 `attrs.edges` 数组**(`[{ target, description }, ...]`)。`target` 是另一 inst.attrs(含 `__instId` 反查)。`makeBridge.add` 不预填 `attrs.edges`,需用户在 bootstrap 显式赋值。
 - **`sa_data.version` 必须是 6**。其他版本(v0.5–v0.8)与 v0.9 实例级 edges 模型不兼容,`load()` 检测到旧版本会丢弃并清空 `sa_data`,走 DEFAULT_BOOTSTRAP(空串)。
+- **边可携带 transform 表达式(ADR-003)**。transform 是 `attrs.edges[i].transform` 上的可选 JS 语句片段字符串,求值方式 `new Function('source','target', body).call(null, srcAttrs, tgtAttrs)`。硬约束:(a) 属性访问**一律 bracket access**(`source['总人数']`,不用点访问——与中文 key、JSON 序列化、panel UI 对齐);(b) 表达式**只能引用边两端 attrs**(不扩展 topo sort,跨节点引用靠手补边);(c) **不受 `execMode === 'off'` 抑制**(transform 像 Excel formula,是属性模型的一部分,`panel.js` 改完走独立 `runTransforms()` 路径绕过 `triggerPropagate` 的 off 短路);(d) `evalTransforms()` 不走 topo 序也不跳过环——声明式公式各跑一次不会无限循环。序列化边形状从 `{ target, description }` 扩展为 `{ target, description, transform? }`。
 - **UI labels are in Chinese; code identifiers are camelCase English.**
 
 ## Documentation
@@ -116,4 +117,5 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 - `docs/decisions/` — **ADR 决策记录**:重大架构决策 + 被拒方案。当前包含:
   - [ADR-001 边模型从 class 级迁到实例级](docs/decisions/adr-001-instance-level-edges.md)
   - [ADR-002 双模式编辑(UI / Code)](docs/decisions/adr-002-dual-mode-editing.md)
+  - [ADR-003 边级 transform 表达式(轻量响应式)](docs/decisions/adr-003-edge-transform-expressions.md)
 - `docs/archive/` — 历史文档归档(v0.8 及之前的设计文档,设计意图参考,不维护)

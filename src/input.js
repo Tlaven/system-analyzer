@@ -6,7 +6,7 @@ import { startPhysics, stopPhysics, applyLayout, fitToView } from './physics.js'
 import { importJSON, save, onExport, onNew, shareURL, deriveEdges, resetRuntime, syncCodeFromRuntime, wrapInstance } from './io.js'
 import { toggleCodeView, commitCodeNow, setCodeViewReadOnly } from './codeview.js'
 import { loadConfig, saveConfig, applyTheme } from './config.js'
-import { showNodePanel } from './panel.js'
+import { showNodePanel, showEdgePanel } from './panel.js'
 import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName } from './utils.js'
 import { stepAll, propagate } from './engine.js'
 import { splitSource } from './parser.js'
@@ -655,10 +655,9 @@ export function initInput() {
     }
     const ed = hitEdge(p.x, p.y)
     if (ed) {
-      // v0.9：边是实例级 attrs.edges 派生，点边 = 选中边 + 打开源节点 panel
+      // ADR-003 OQ#1：点边 = 选中边 + 弹独立边 panel(跟节点 panel 平级)
       selectEdge(ed)
-      const src = state.runtimeInstances.find(i => i.varName === ed.source_instance)
-      if (src) showNodePanel(src)
+      showEdgePanel(ed.id)
       return
     }
     deselectAll(); render()

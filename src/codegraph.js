@@ -187,7 +187,7 @@ export function serializeCode(_state) {
       }
     }
 
-    // edges 数组：每条 { target, description }，target 序列化为目标 varName
+    // edges 数组：每条 { target, description, transform? }，target 序列化为目标 varName
     const edges = inst.attrs.edges
     if (Array.isArray(edges) && edges.length > 0) {
       const items = edges.map(e => {
@@ -195,7 +195,11 @@ export function serializeCode(_state) {
           ? e.target.__instId.varName
           : 'null'
         const desc = (e && e.description != null) ? e.description : ''
-        return '    { target: ' + tgtVar + ', description: ' + formatValue(desc) + ' }'
+        const fields = ['target: ' + tgtVar, 'description: ' + formatValue(desc)]
+        if (e && typeof e.transform === 'string' && e.transform.length > 0) {
+          fields.push('transform: ' + formatValue(e.transform))
+        }
+        return '    { ' + fields.join(', ') + ' }'
       })
       bootLines.push(inst.varName + '.edges = [\n' + items.join(',\n') + '\n  ]')
     }

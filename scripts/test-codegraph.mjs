@@ -437,5 +437,220 @@ const X_1 = GraphStarter.add(X)`
     /description\s*=\s*'描述'/.test(serialized), serialized)
 }
 
+// ============================================================
+console.log('\n=== 区 15：transform 字段透传 + serializeCode（ADR-003）===')
+{
+  const src = `class A {
+  description = '源'
+  attrs = { x: 0 }
+}
+class B {
+  description = '目标'
+  attrs = { z: 0 }
+}
+const A_1 = GraphStarter.add(A)
+const B_1 = GraphStarter.add(B)
+A_1.x = 10
+A_1.edges = [
+  { target: B_1, description: '影响', transform: "target['z'] = source['x'] * 2" }
+]`
+  const state = makeState()
+  state.sourceCode = src
+  runSource(state.sourceCode, state)
+
+  const aInst = state.runtimeInstances.find(i => i.varName === 'A_1')
+  check('runSource 后 edge.transform 透传',
+    aInst.attrs.edges[0].transform === "target['z'] = source['x'] * 2",
+    aInst.attrs.edges[0].transform)
+
+  const serialized = serializeCode(state)
+  check('serializeCode 输出 transform 字段',
+    /transform:\s/.test(serialized), serialized)
+
+  const state2 = makeState()
+  runSource(serialized, state2)
+  const aInst2 = state2.runtimeInstances.find(i => i.varName === 'A_1')
+  check('round-trip 后 transform 保留',
+    aInst2.attrs.edges[0] && aInst2.attrs.edges[0].transform === "target['z'] = source['x'] * 2",
+    aInst2.attrs.edges[0])
+
+  // 没 transform 的边——老 graph 兼容,字段不存在
+  const srcNoT = `class A {
+  description = '源'
+  attrs = { x: 0 }
+}
+class B {
+  description = '目标'
+  attrs = { z: 0 }
+}
+const A_1 = GraphStarter.add(A)
+const B_1 = GraphStarter.add(B)
+A_1.edges = [
+  { target: B_1, description: '纯结构边' }
+]`
+  const state3 = makeState()
+  runSource(srcNoT, state3)
+  const aInst3 = state3.runtimeInstances.find(i => i.varName === 'A_1')
+  check('没 transform 的边 transform 字段 undefined',
+    aInst3.attrs.edges[0].transform === undefined,
+    aInst3.attrs.edges[0])
+  const serialized3 = serializeCode(state3)
+  check('serializeCode 不输出空 transform 字段',
+    !/transform:/.test(serialized3), serialized3)
+}
+
+// ============================================================
+console.log('\n=== 区 16：transform 表达式实际执行（ADR-003 核心行为）===')
+{
+  // evalTransforms 的核心逻辑（engine.js 没 export,这里 inline 复刻用于测试）
+  // 跟 engine.js:evalTransforms 一致:遍历 runtimeInstances 的 attrs.edges,
+  // 有 transform 字符串就 new Function('source','target', body).call(null, srcAttrs, tgtAttrs)
+  function evalTransformsInline(state) {
+    for (const inst of state.runtimeInstances) {
+      const edges = Array.isArray(inst.attrs.edges) ? inst.attrs.edges : []
+      for (const e of edges) {
+        if (!e || typeof e.transform !== 'string' || e.transform.length === 0) continue
+        if (!e.target || typeof e.target !== 'object') continue
+        new Function('source', 'target', e.transform).call(null, inst.attrs, e.target)
+      }
+    }
+  }
+
+  // frostpunk2 demo 的核心 transform：人口吃食物
+  const src = `class Population {
+  description = '人口'
+  attrs = { 总人数: 0 }
+}
+class Food {
+  description = '食物'
+  attrs = { '变化/周': 0 }
+}
+const Population_1 = GraphStarter.add(Population)
+const Food_1 = GraphStarter.add(Food)
+Population_1.总人数 = 8000
+Population_1.edges = [
+  {
+    target: Food_1,
+    description: '劳动力换食物',
+    transform: "target['变化/周'] = -source['总人数'] * 7 / 400"
+  }
+]`
+  const state = makeState()
+  state.sourceCode = src
+  runSource(state.sourceCode, state)
+
+  const foodInst = state.runtimeInstances.find(i => i.varName === 'Food_1')
+  const popInst = state.runtimeInstances.find(i => i.varName === 'Population_1')
+  check('初始 Food_1.变化/周 是 0',
+    foodInst.attrs['变化/周'] === 0, foodInst.attrs['变化/周'])
+
+  evalTransformsInline(state)
+  check('evalTransforms 后 Food_1.变化/周 = -140 (8000 * 7 / 400)',
+    foodInst.attrs['变化/周'] === -140, foodInst.attrs['变化/周'])
+
+  // 响应式验证：改上游 attr 再跑，下游跟着变
+  popInst.attrs['总人数'] = 16000
+  evalTransformsInline(state)
+  check('上游 Population.总人数 改 16000 后重算 Food_1.变化/周 = -280',
+    foodInst.attrs['变化/周'] === -280, foodInst.attrs['变化/周'])
+
+  // 多语句 + if 控制流 transform
+  const src2 = `class A {
+  description = '源'
+  attrs = { 库存: 100, 阈值: 50 }
+}
+class B {
+  description = '目标'
+  attrs = { 饥饿: false }
+}
+const A_1 = GraphStarter.add(A)
+const B_1 = GraphStarter.add(B)
+A_1.edges = [
+  {
+    target: B_1,
+    description: '阈值检测',
+    transform: "if (source['库存'] < source['阈值']) target['饥饿'] = true"
+  }
+]`
+  const state2 = makeState()
+  state2.sourceCode = src2
+  runSource(state2.sourceCode, state2)
+  const aInst2 = state2.runtimeInstances.find(i => i.varName === 'A_1')
+  const bInst2 = state2.runtimeInstances.find(i => i.varName === 'B_1')
+
+  evalTransformsInline(state2)
+  check('多语句 transform: 库存 100 不小于 阈值 50,饥饿保持 false',
+    bInst2.attrs['饥饿'] === false, bInst2.attrs['饥饿'])
+
+  aInst2.attrs['库存'] = 30
+  evalTransformsInline(state2)
+  check('库存降到 30 < 阈值 50,饥饿变 true',
+    bInst2.attrs['饥饿'] === true, bInst2.attrs['饥饿'])
+}
+
+// ============================================================
+console.log('\n=== 区 17：中文 class name（scanner Unicode 支持）===')
+{
+  const src = `class 源 {
+  description = '中文源'
+  attrs = { 数量: 5 }
+}
+class 目标 {
+  description = '中文目标'
+  attrs = { 结果: 0 }
+}
+const 源_1 = GraphStarter.add(源)
+const 目标_1 = GraphStarter.add(目标)
+源_1.edges = [
+  {
+    target: 目标_1,
+    description: '中文 key 转发',
+    transform: "target['结果'] = source['数量'] * 3"
+  }
+]`
+  const state = makeState()
+  state.sourceCode = src
+  runSource(state.sourceCode, state)
+
+  check('state.classes 含 "源"',
+    state.classes['源'] !== undefined, Object.keys(state.classes))
+  check('state.classes 含 "目标"',
+    state.classes['目标'] !== undefined, Object.keys(state.classes))
+
+  const srcInst = state.runtimeInstances.find(i => i.varName === '源_1')
+  const tgtInst = state.runtimeInstances.find(i => i.varName === '目标_1')
+  check('varName 源_1 存在', srcInst !== undefined,
+    state.runtimeInstances.map(i => i.varName))
+  check('varName 目标_1 存在', tgtInst !== undefined,
+    state.runtimeInstances.map(i => i.varName))
+
+  // transform 在中文 class name graph 里也工作
+  function evalTransformsInline(state) {
+    for (const inst of state.runtimeInstances) {
+      const edges = Array.isArray(inst.attrs.edges) ? inst.attrs.edges : []
+      for (const e of edges) {
+        if (!e || typeof e.transform !== 'string' || e.transform.length === 0) continue
+        if (!e.target || typeof e.target !== 'object') continue
+        new Function('source', 'target', e.transform).call(null, inst.attrs, e.target)
+      }
+    }
+  }
+  evalTransformsInline(state)
+  check('transform 执行: 目标_1.结果 = 15 (5 * 3)',
+    tgtInst.attrs['结果'] === 15, tgtInst.attrs['结果'])
+
+  // round-trip 验证
+  const serialized = serializeCode(state)
+  check('serializeCode 输出中文 class 声明',
+    /class 源 /.test(serialized), serialized)
+  const state2 = makeState()
+  runSource(serialized, state2)
+  check('round-trip 后 state.classes 含 "源"',
+    state2.classes['源'] !== undefined, Object.keys(state2.classes))
+  const tgtInst2 = state2.runtimeInstances.find(i => i.varName === '目标_1')
+  check('round-trip 后 varName 目标_1 保留',
+    tgtInst2 !== undefined, state2.runtimeInstances.map(i => i.varName))
+}
+
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

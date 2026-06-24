@@ -1,98 +1,130 @@
 # System Analyzer
 
-> 给 AI 看的说明书。如果你是 AI 且读到这里，说明用户希望你能用这个工具。
+> 给 AI 看的说明书。如果你是 AI 且读到这里,说明用户希望你能用这个工具。
 
-> **v0.9 架构（2026-06-18）：双模式编辑 + 实例级 edges 模型**
->
-> 整张 graph = 一段 sourceCode 字符串。**显式分双模式**：
-> - **UI 模式**（默认）：声明式 sourceCode（class 含 3 个实例级 class field，**无方法体**）。Panel 可编辑，Codeview 只读。
-> - **Code 模式**：sourceCode 完全自由（含方法体、for/if/参数化）。Codeview 可写，Panel 只读。
->
-> UI 模式 sourceCode 长这样（3 个 class field + 启动段多行赋值）：
->
-> ```js
-> class Processor {
->   description = "处理输入数据并传给下游"
->   name = "处理器"
->   attrs = {
->     speed: 100
->   }
-> }
->
-> const Processor_1 = GraphStarter.add(Processor)
-> const Processor_2 = GraphStarter.add(Processor)
-> const Database_1 = GraphStarter.add(Database)
-> Processor_1.edges = [
->   { target: Database_1, description: '主数据流' }
-> ]
-> Processor_2.speed = 200
-> ```
->
-> Code 模式可以补方法体（AI 写实现）：
->
-> ```js
-> class Processor {
->   description = "处理输入数据并传给下游"
->   name = "处理器"
->   attrs = { speed: 100 }
->   process({ dt }) {
->     for (const e of this.edges || []) {
->       e.target.input = this.speed * dt
->     }
->   }
-> }
-> ```
->
-> **核心规则（v0.9）：**
-> - 节点 = RuntimeInstance（varName 是身份，由 `GraphStarter.add()` 内部自动生成 `<ClassName>_<n>`，或第二参数 explicitName 覆盖）
-> - 多实例共享 class（同一个 class 可以 add 多次）
-> - **3 个 class field（实例级，无 static 前缀）**：
->   - `description` (string)：class 默认描述
->   - `name` (string，可选)：class 默认名（空时画布回退到 className）
->   - `attrs` (`{ key: value, ... }`)：class 默认属性字典（纯数据，**无 null 引用槽**）
-> - **边在实例级 attrs.edges 数组**：每条 `{ target, description }`，target 指向另一实例的 attrs
-> - **多边支持**：一个实例可以有任意多条 edges（多对一 / 多对多 / 同目标多边都行）
-> - **attrs 是真正的追加字典**：实例能加 class 没有的字段（包括 `edges`），runSource 后保留
-> - **3 类 attrs 字段**：`name`/`description`（元信息）/ `edges`（边数组）/ 其他（数据属性，画为属性行）
-> - 实例 override 写在启动段（每个字段单独一行：`Processor_2.speed = 200`），class 默认值永远保留
-> - 运行时 mutation（方法体里 `this.X = ...` 写 self）不入代码，reset 时丢弃
-> - URL 分享：编码 sourceCode（UTF-8 safe base64），上限 24000 字符
->
-> **关键变化（vs v0.8）：**
-> - **删除 `class.edges`**：边不再在 class 声明（之前是 `[{ name, description }]` 槽声明）
-> - **删除 attrs 里的 null 引用槽**：之前 `attrs = { next_stage: null }` 是边的存储槽，现在 attrs 是纯数据
-> - **边彻底实例化**：`Source_1.edges = [{ target: X, description: '...' }]`，per-instance、per-edge
-> - **失去具名槽访问**：方法体里 `this.next_stage.input = ...` 改成 `for (const e of this.edges || []) e.target.input = ...`
-> - **panel 边 UI 改为实例模式独有**：每条边显示 target 下拉 + description 输入 + 删除按钮；类型模式无边区
-> - **拖边交互简化**：mouseup 时弹 modal 收 description → 直接 push 到 `srcInst.attrs.edges`
-> - **label 兜底链**：`attrs.name → cls.name → className → varName`（无 name 时显示 className 而非 varName）
-> - 持久化 sa_data version 5→6，旧版本硬切换丢弃
->
-> 当前架构以 `CLAUDE.md` 为准。下方 v0.5/v0.6/v0.7/v0.8 文本保留作历史参考。
+## 这是什么
 
-## 你的核心任务（v0.9）
+System Analyzer 是一个 web 端的**系统关系可视化工具**。它能让用户(人或你)把一个复杂系统拆解成节点和关系,看清结构,甚至让系统"跑起来"做仿真。
 
-graph 的存储格式是 **一段 JS sourceCode**。你的核心工作：
+工具完全静态部署,打开一个 URL 即可使用,不需要安装、注册、配置。
 
-1. **读取 URL 里的 sourceCode**（base64 → JSON → `.sourceCode`）
-2. **判断当前模式**：UI 模式（无方法体）/ Code 模式（含方法体）
-3. **读懂 3 个 class field（description / name / attrs）+ 实例级 attrs.edges**，理解关系语义
-4. **修改 sourceCode**：
-   - 在 Code 模式给 class 补方法体（迭代 `this.edges` 数组访问下游）
-   - 或在启动段加 `GraphStarter.add(ClassName)` 增加实例（varName 自动生成）
+## 你该怎么用这个工具
+
+当用户聊到"某个系统是怎样运作的"、"帮我画个 X 的关系图"、"模拟一下 Y 的演化"这类需求时,你可以:
+
+1. **按下方 sourceCode 格式构造 graph**(3 个 class field + 实例级 edges,可选 transform 公式)
+2. **编码到 URL hash**(UTF-8 safe base64)
+3. **输出 URL 给用户**,用户点开就能看到可视化
+
+用户也可以在 UI 上手动调整后**复制新 URL 回对话**——你 fetch 这个 URL,解码 hash,就能看到用户修改后的 code,按需重新填实现。
+
+## 当前模型:sourceCode 是真相源
+
+整张 graph = 一段 sourceCode 字符串。**显式分双模式**:
+
+- **UI 模式**(默认):声明式 sourceCode(class 含 3 个实例级 class field,**无方法体**)。Panel 可编辑,Codeview 只读。
+- **Code 模式**:sourceCode 完全自由(含方法体、for/if/参数化)。Codeview 可写,Panel 只读。
+
+### sourceCode 格式
+
+UI 模式长这样(3 个 class field + 启动段多行赋值):
+
+```js
+class Processor {
+  description = "处理输入数据并传给下游"
+  name = "处理器"
+  attrs = {
+    speed: 100
+  }
+}
+
+const Processor_1 = GraphStarter.add(Processor)
+const Processor_2 = GraphStarter.add(Processor)
+const Database_1 = GraphStarter.add(Database)
+Processor_1.edges = [
+  { target: Database_1, description: '主数据流' }
+]
+Processor_2.speed = 200                 // 实例 override
+```
+
+边可以携带 transform 表达式——边级 JS 语句片段,**像 Excel formula 一样改上游自动重算下游**,不需要写完整方法体:
+
+```js
+Population_1.edges = [
+  {
+    target: Food_1,
+    description: '劳动力换食物',
+    transform: "target['需求量'] = source['总人数'] * 0.02"
+  }
+]
+```
+
+Code 模式可以补方法体(AI 写实现):
+
+```js
+class Processor {
+  description = "处理输入数据并传给下游"
+  name = "处理器"
+  attrs = { speed: 100 }
+  process({ dt }) {
+    for (const e of this.edges || []) {
+      e.target.input = this.speed * dt
+    }
+  }
+}
+```
+
+### 核心规则
+
+- 节点 = RuntimeInstance(varName 是身份,由 `GraphStarter.add()` 内部自动生成 `<ClassName>_<n>`,或第二参数 explicitName 覆盖)
+- 多实例共享 class(同一个 class 可以 add 多次)
+- **3 个 class field(实例级,无 static 前缀)**:
+  - `description` (string):class 默认描述
+  - `name` (string,可选):class 默认名(空时画布回退到 className)
+  - `attrs` (`{ key: value, ... }`):class 默认属性字典(纯数据,**无 null 引用槽**)
+- **边在实例级 attrs.edges 数组**:每条 `{ target, description, transform? }`,target 指向另一实例的 attrs,transform 是可选响应式公式(见下)
+- **多边支持**:一个实例可以有任意多条 edges(多对一 / 多对多 / 同目标多边都行)
+- **attrs 是真正的追加字典**:实例能加 class 没有的字段(包括 `edges`),runSource 后保留
+- **3 类 attrs 字段**:`name`/`description`(元信息)/ `edges`(边数组)/ 其他(数据属性,画为属性行)
+- 实例 override 写在启动段(每个字段单独一行:`Processor_2.speed = 200`),class 默认值永远保留
+- 运行时 mutation(方法体里 `this.X = ...` 写 self)不入代码,reset 时丢弃
+- **中文/Unicode 标识符全栈支持**:class name、attr key、varName 都可以是中文或其他非 ASCII 字母(`class 人口 { attrs = { 总人数: 0 } }` → varName `人口_1`)。transform 表达式里访问 attr 一律 bracket access:`source['总人数']`,**不要用点访问**
+- URL 分享:编码 sourceCode(UTF-8 safe base64),上限 24000 字符
+
+### transform 表达式(边级响应式)
+
+- transform 是 **JS 语句片段字符串**,求值时 `new Function('source','target', body).call(null, srcAttrs, tgtAttrs)`,`source` / `target` 自动绑定到边两端 attrs
+- 属性访问**一律 bracket access**:`source['key']` / `target['key']`(不用点访问——对齐中文 key、JSON 序列化、panel UI)
+- 表达式**只能引用边两端 attrs**(source / target)——跨节点引用靠手补边
+- **不受 `execMode` 抑制**:写了立即生效(`auto` 模式走 `propagate()`,`off` / `manual` 走 `runTransforms()`,绕过 off 短路)
+- **多语句合法**:`if (source['库存'] < source['阈值']) target['饥饿'] = true`
+- 跟方法体一样,transform 内禁止 `import` / `require` / `fetch` / `XMLHttpRequest` / `eval`(文档约定,无运行时强制)
+- 无 transform 的边是纯结构边,不保留任何隐式"默认流动"
+
+## 你的核心任务
+
+graph 的存储格式是 **一段 JS sourceCode**。你的核心工作:
+
+1. **读取 URL 里的 sourceCode**(base64 → JSON → `.sourceCode`)
+2. **判断当前模式**:UI 模式(无方法体)/ Code 模式(含方法体)
+3. **读懂 3 个 class field(description / name / attrs)+ 实例级 attrs.edges**,理解关系语义
+4. **修改 sourceCode**:
+   - 在 Code 模式给 class 补方法体(迭代 `this.edges` 数组访问下游)
+   - 或在启动段加 `GraphStarter.add(ClassName)` 增加实例(varName 自动生成)
    - 或追加 `X.edges = [{ target: Y, description: '...' }]` 建立连接
-5. **输出新 URL**（含更新后的 sourceCode）
+   - 或在边上加 `transform` 公式:`{ target: Y, description: '...', transform: "target['out'] = source['in'] * 0.5" }`——改上游 attr 自动重算下游,比写方法体轻
+5. **输出新 URL**(含更新后的 sourceCode)
 
-人写 `description` + 启动段连接 = 给你写需求文档；你填方法体 = 按需求实现。
+人写 `description` + 启动段连接 = 给你写需求文档;你填方法体 = 按需求实现。
 
-## URL 编码（v0.9）
+## URL 编码
 
 ```js
 function toB64(str) {
   return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
     (_, p1) => String.fromCharCode(parseInt(p1, 16))))
 }
-// wrapper 格式：{version:6, sourceCode, visualState, graphId, graphTitle, editMode}
+// wrapper 格式:{version:6, sourceCode, visualState, graphId, graphTitle, editMode}
 const url = location.origin + location.pathname + '#' + toB64(JSON.stringify({
   version: 6,
   sourceCode: yourCode,
@@ -102,72 +134,16 @@ const url = location.origin + location.pathname + '#' + toB64(JSON.stringify({
 }))
 ```
 
----
-
-# ⚠️ 下方内容为 v0.5/v0.6/v0.7/v0.8 历史文档，已被 v0.9 取代
-
-下方描述的"class.edges 声明槽 / attrs 里的 null 引用槽 / this.target 具名访问"等机制
-在 v0.9 中已改为实例级 attrs.edges 数组模型：3 个 class field（description / name / attrs）
-+ 实例级 `attrs.edges = [{ target, description }]`。保留下方文本仅作历史参考。
-
----
-
-# v0.8 历史摘要（class field + class.edges 槽声明模型，已被 v0.9 取代）
-
-v0.8（2026-06-17）使用实例级 class field（4 个：description / name / edges / attrs）。
-edges 是 class 级声明 `[{ name, description }]` + attrs 里的 null 槽存储 + 实例 attrs[name] = target。
-v0.9 简化为：删除 class.edges，边彻底实例化到 `attrs.edges` 数组。
-
----
-
-# v0.7 历史摘要（static edges + constructor 模型，已被 v0.8 取代）
-
-v0.7（2026-06-17）使用 `static description` + `static edges` + `constructor() { this.X = ... }` 风格。
-
----
-
-# v0.6 历史摘要（emitter-based 模型，已被 v0.7+ 取代）
-
-v0.6（2026-06-16）的核心承诺是"sourceCode 是唯一真相源 + UI/代码双向无损同步"。
-实践无法兑现——代码是程序性的（for/if/方法体），UI 操作是陈述性的（离散原子变更），
-强行双向同步会丢失用户的程序性意图。v0.7 用显式双模式解决这个冲突。
-
----
-
-# ⚠️ 下方内容为 v0.5 历史文档（instance-based + 静态扫描模型），已被 v0.6+ 取代
-
-下方描述的"class 库 bundle 内置 / state.instances 数组 / 点击实例化 / 没有 codeview"等机制
-在 v0.6 中全部反转：sourceCode 字符串现在是唯一真相源，codeview 重新引入，加实例必须
-在代码里写 `GraphStarter.add(ClassName)`。保留下方文本仅作历史参考。
-
----
-
-## 这是什么
-
-System Analyzer 是一个 web 端的**系统关系可视化工具**。它能让用户（人或你）把一个复杂系统拆解成节点和关系，看清结构，甚至让系统"跑起来"做仿真。
-
-工具完全静态部署（GitHub Pages），打开一个 URL 即可使用，不需要安装、注册、配置。
-
-## 你该怎么用这个工具
-
-当用户聊到"某个系统是怎样运作的"、"帮我画个 X 的关系图"、"模拟一下 Y 的演化"这类需求时，你可以：
-
-1. **按 v0.9 sourceCode 格式构造 graph**（3 个 class field + 实例级 edges）
-2. **编码到 URL hash**（UTF-8 safe base64）
-3. **输出 URL 给用户**，用户点开就能看到可视化
-
-用户也可以在 UI 上手动调整后**复制新 URL 回对话**——你 fetch 这个 URL，解码 hash，就能看到用户修改后的 code，按需重新填实现。
-
 ## 限制
 
-- **URL hash 长度上限：24000 字符**（base64 编码后）。超过请提示用户用"导出文件"。
-- 节点数量建议 < 50（更多会卡）。
-- 浏览器端执行（`new Function`），不能做重计算。
-- 方法体里禁止 `import` / `require` / `fetch` / `XMLHttpRequest` / `eval`。
+- **URL hash 长度上限:24000 字符**(base64 编码后)。超过请提示用户用"导出文件"。
+- 节点数量建议 < 50(更多会卡)。
+- 浏览器端执行(`new Function`),不能做重计算。
+- 方法体 / transform 内禁止 `import` / `require` / `fetch` / `XMLHttpRequest` / `eval`(文档约定,无运行时强制)。
 
 ## 不要做的
 
-- 不要把 API key 或敏感数据放在 graph 里（URL 是明文 base64，不是加密）。
-- 不要在 code 方法体里调用 `fetch`、`eval`、`import`——会被工具拒绝。
-- 不要修改 `description`——你的任务是读它、填实现，描述是用户的需求文档。
+- 不要把 API key 或敏感数据放在 graph 里(URL 是明文 base64,不是加密)。
+- 不要在 code 方法体 / transform 里调用 `fetch`、`eval`、`import`——会被工具拒绝。
+- 不要修改 `description`——你的任务是读它、填实现,描述是用户的需求文档。
 - 不要假设用户能跑 Level 3 仿真——需要用户在 UI 上点"下一步"或开启自动模式。

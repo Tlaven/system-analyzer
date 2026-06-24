@@ -80,6 +80,38 @@ function callInstMethod(inst, methodName, args) {
   }
 }
 
+// 对所有 inst 的 attrs.edges 遍历,有 transform 的边求值。
+// transform 是边级 JS 语句片段,source/target 绑定到边两端 attrs(ADR-003)。
+// 不依赖 topo 序也不跳过环(_topoError):transform 是声明式"边级公式",
+// 各跑一次不会无限循环;按 runtimeInstances 定义顺序跑,source 通常先于 target。
+function evalTransforms() {
+  for (const inst of state.runtimeInstances) {
+    const edges = Array.isArray(inst.attrs.edges) ? inst.attrs.edges : []
+    for (const e of edges) {
+      if (!e || typeof e.transform !== 'string' || e.transform.length === 0) continue
+      if (!e.target || typeof e.target !== 'object') continue
+      const tgtVar = (e.target.__instId && e.target.__instId.varName) || '?'
+      try {
+        const start = performance.now()
+        const fn = new Function('source', 'target', e.transform)
+        fn.call(null, inst.attrs, e.target)
+        inst._execError = (performance.now() - start > EXEC_TIMEOUT_MS)
+          ? 'transform[' + inst.varName + '→' + tgtVar + ']: 超时'
+          : null
+      } catch (err) {
+        inst._execError = 'transform[' + inst.varName + '→' + tgtVar + ']: ' + err.message
+      }
+    }
+  }
+}
+
+// 独立 transform 求值入口,不受 execMode 抑制(ADR-003 OQ#2)。
+// setEdgeTransform 改完后直调,绕过 triggerPropagate 的 off 短路。
+export function runTransforms() {
+  evalTransforms()
+  render()
+}
+
 // 从某实例开始按拓扑序调用方法，传播到下游
 export function propagate(startVarName) {
   const order = topologicalSort()
@@ -96,6 +128,7 @@ export function propagate(startVarName) {
       callInstMethod(inst, methodName, { dt: 1 })
     }
   }
+  evalTransforms()
   render()
 }
 

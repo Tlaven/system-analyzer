@@ -104,7 +104,7 @@ function skipBracketed(c, open, close) {
 
 function scanIdentifier(c) {
   let id = ''
-  while (!c.eof() && /\w/.test(c.peek())) id += c.next()
+  while (!c.eof() && /[\p{L}\p{N}_]/u.test(c.peek())) id += c.next()
   return id
 }
 

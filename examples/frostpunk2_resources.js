@@ -75,7 +75,11 @@ Population_1.住房总数 = 2631
 Population_1.劳动力剩余 = 4800
 Population_1.edges = [
     { target: Heatstamps_1, description: '人口税收' },
-    { target: Food_1, description: '劳动力换食物' },
+    {
+      target: Food_1,
+      description: '劳动力换食物',
+      transform: "target['变化/周'] = -source['总人数'] * 7 / 400"
+    },
     { target: Fuel_1, description: '劳动力换燃料' },
     { target: Goods_1, description: '劳动力换商品' },
     { target: Prefabs_1, description: '劳动力换预制零部件' },

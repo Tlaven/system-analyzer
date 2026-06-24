@@ -10,7 +10,7 @@ import { state, config } from './state.js'
 import { render } from './renderer.js'
 import { pushUndo, delInstance, delEdge } from './editor.js'
 import { save, syncCodeFromRuntime } from './io.js'
-import { propagate } from './engine.js'
+import { propagate, runTransforms } from './engine.js'
 import { esc } from './utils.js'
 import { _equal } from './codegraph.js'
 import { showModal } from './input.js'
@@ -22,10 +22,14 @@ const panelBody = $('#panel-body')
 
 let _propagateTimer
 function triggerPropagate(varName) {
-  if (config.execMode === 'off') return
   clearTimeout(_propagateTimer)
   _propagateTimer = setTimeout(() => {
-    if (config.execMode === 'auto') propagate(varName)
+    if (config.execMode === 'auto') {
+      propagate(varName)
+    } else {
+      // off / manual:transform 仍跑(ADR-003 OQ#2:transform 像 Excel formula)
+      runTransforms()
+    }
   }, 300)
 }
 
@@ -87,6 +91,90 @@ export function setPanelMode(mode) {
   showNodePanel(cur)
 }
 window.setPanelMode = setPanelMode
+
+// ============ Edge Panel(独立,跟 Node Panel 平级;ADR-003 OQ#1) ============
+// edgeId 格式 `<srcVar>><tgtVar>>idx`,idx 是 source.attrs.edges 数组里的位置(io.js:46)。
+// 渲染 description / source+target 属性列表提示 / transform textarea。
+export function showEdgePanel(edgeId) {
+  state.panelUndoPushed = false
+  const parts = String(edgeId).split('>')
+  if (parts.length < 3) return
+  const srcVar = parts[0]
+  const idx = parseInt(parts[parts.length - 1], 10)
+  const srcInst = state.runtimeInstances.find(i => i.varName === srcVar)
+  if (!srcInst) return
+  const edges = Array.isArray(srcInst.attrs.edges) ? srcInst.attrs.edges : []
+  const edge = edges[idx]
+  if (!edge || !edge.target || typeof edge.target !== 'object') return
+  const tgtInst = state.runtimeInstances.find(i => i.attrs === edge.target)
+  if (!tgtInst) return
+
+  state.selEdge = edgeId
+  const codeMode = state.editMode === 'code'
+
+  const srcCls = state.classes[srcInst.className]
+  const tgtCls = state.classes[tgtInst.className]
+  const srcLabel = srcInst.attrs.name || (srcCls && srcCls.name) || srcInst.className || srcInst.varName
+  const tgtLabel = tgtInst.attrs.name || (tgtCls && tgtCls.name) || tgtInst.className || tgtInst.varName
+
+  panelTitle.textContent = codeMode ? '查看边（Code 模式只读）' : '编辑边'
+  let html = '<div class="panel-id">' + esc(srcInst.varName) + ' → ' + esc(tgtInst.varName) + '</div>'
+  html += '<div class="panel-sub">' + esc(srcLabel) + ' → ' + esc(tgtLabel) + '</div>'
+
+  const desc = (edge.description != null) ? edge.description : ''
+  html += '<div class="field">' +
+    '<span class="fl">边描述</span>' +
+    '<input type="text" id="ep-desc" value="' + esc(desc) + '"' + (codeMode ? ' disabled' : '') + '>' +
+    '</div>'
+
+  const srcKeys = Object.keys(srcInst.attrs).filter(k => !k.startsWith('__') && k !== 'edges' && k !== 'name' && k !== 'description')
+  const tgtKeys = Object.keys(tgtInst.attrs).filter(k => !k.startsWith('__') && k !== 'edges' && k !== 'name' && k !== 'description')
+  html += '<div class="prop-title" style="margin-top:8px">属性引用提示（照抄 key 名）</div>'
+  html += '<div class="panel-hint" style="font-size:11px;color:var(--flbl);margin:4px 0;font-family:monospace">source: ' + (srcKeys.length ? srcKeys.map(esc).join(' | ') : '(无)') + '</div>'
+  html += '<div class="panel-hint" style="font-size:11px;color:var(--flbl);margin:4px 0;font-family:monospace">target: ' + (tgtKeys.length ? tgtKeys.map(esc).join(' | ') : '(无)') + '</div>'
+
+  const transform = (typeof edge.transform === 'string') ? edge.transform : ''
+  html += '<div class="field">' +
+    '<span class="fl">transform(JS 语句片段,用 source[\'k\'] / target[\'k\'] 访问)</span>' +
+    '<textarea id="ep-transform"' + (codeMode ? ' disabled' : '') + ' placeholder="target[\'Y\'] = source[\'X\'] * 0.02" style="font-family:monospace;font-size:12px;min-height:80px">' + esc(transform) + '</textarea>' +
+    '</div>'
+
+  if (!codeMode) {
+    html += '<button class="btn-del" onclick="delCurrentEdge()" style="margin-top:8px">删除边</button>'
+  }
+
+  panelBody.innerHTML = html
+  panel.classList.remove('hidden')
+
+  if (!codeMode) {
+    const descInp = document.getElementById('ep-desc')
+    if (descInp) {
+      descInp.oninput = function() {
+        if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+        edge.description = this.value
+        syncCodeFromRuntime(); render()
+      }
+    }
+    const transformEl = document.getElementById('ep-transform')
+    if (transformEl) {
+      transformEl.oninput = function() {
+        if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+        edge.transform = this.value
+        syncCodeFromRuntime()
+        // 立即重算 transform(绕过 execMode,ADR-003 OQ#2:transform 像 Excel formula)
+        runTransforms()
+      }
+    }
+    window.delCurrentEdge = function() {
+      if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+      const arr = srcInst.attrs.edges
+      if (Array.isArray(arr) && idx >= 0 && idx < arr.length) arr.splice(idx, 1)
+      state.selEdge = null
+      syncCodeFromRuntime(); render(); hidePanel()
+    }
+  }
+}
+window.showEdgePanel = showEdgePanel
 
 // ============ Instance/Type Panel ============
 export function showNodePanel(inst, highlightRef) {
