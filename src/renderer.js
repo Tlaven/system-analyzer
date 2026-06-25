@@ -349,7 +349,7 @@ export function render() {
     if (n.error) {
       ctx.save()
       ctx.font = '10px "Microsoft YaHei",sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'
-      const ey = r.y + r.h + 12 * (n.outputs.length + 1)
+      const ey = r.y + r.h + 12
       ctx.fillStyle = '#e53935'; ctx.fillText('⚠ ' + truncateText(ctx, n.error, r.w - 16), r.x + 8, Math.min(ey, window.innerHeight))
       ctx.restore()
     }

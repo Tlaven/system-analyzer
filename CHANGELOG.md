@@ -16,6 +16,10 @@
 
 ### Removed
 
+- **wrapInstance 3 个 0-调用方 getter**:`inst.inputs` / `inst.outputs`(v0.8 端口概念残留,永远返回 `[]`)/ `inst.computed`(0 调用方,`define-demo.mjs` 的 `.computed` 是它自己 model shape 不是 inst)。同步解开 `renderer.js:352` 死代码 `12 * (n.outputs.length + 1)` → `12`(outputs 永远 [] → 该表达永为 12)
+
+### Removed
+
 - `engine.js` 对 `renderer.js` 的 import + 内部 3 处 `render()` 直调 + `step-btn` DOM 读写
 - `io.js deriveEdges` 函数(已迁入 codegraph.js)
 - `editor.js selectNode` 兼容别名(0 调用方,`delNode` 仍被 panel.js HTML onclick 用而保留)

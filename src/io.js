@@ -97,24 +97,6 @@ export function wrapInstance(inst) {
     },
     enumerable: false, configurable: true,
   })
-  Object.defineProperty(inst, 'inputs', {
-    get() {
-      // v0.9: 没有命名端口概念，inputs 空数组（不再画端口圆点）
-      return []
-    },
-    enumerable: false, configurable: true,
-  })
-  Object.defineProperty(inst, 'outputs', {
-    get() {
-      // v0.9: 没有命名端口概念，outputs 空数组（不再画端口圆点）
-      return []
-    },
-    enumerable: false, configurable: true,
-  })
-  Object.defineProperty(inst, 'computed', {
-    get() { return inst.attrs },
-    enumerable: false, configurable: true,
-  })
   Object.defineProperty(inst, 'error', {
     get() {
       if (inst._topoError) return inst._topoError
