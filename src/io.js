@@ -4,7 +4,7 @@
 //   - state.sourceCode 是唯一真相源；runtimeInstances 是派生（runSource 得到）
 //   - save/load: localStorage.sa_data 存 {version:3, sourceCode, visualState, ...}
 //   - shareURL: 编码 sourceCode（base64）
-//   - deriveEdges: 基于 runtimeInstances + classes（class emitters）
+//   - deriveEdges: v0.13 已迁出到 codegraph.js(lazy 缓存 + invalidateEdges)
 //   - wrapInstance: 给 RuntimeInstance 加 v0.5 node 形状的 getter，让 renderer/utils 不用大改
 //   - 删除 snapshotAttrs/rehydrateReferences/snapshotInstances/restoreInstances
 //     （attrs 上的引用就是 attrs 对象，无需身份转换）
@@ -16,52 +16,6 @@ import { applyLayout, fitToView, spreadUnpositioned } from './physics.js'
 import { toB64 } from './utils.js'
 import { runSource, serializeCode } from './codegraph.js'
 import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
-
-// ============ Edges — 由实例级 attrs.edges 派生 ============
-//
-// v0.9 边的存在条件：
-//   源实例的 attrs.edges 数组含 { target, description } 条目；
-//   target 是另一 inst.attrs（含 __instId 反查），description 是该边的描述（per-edge）。
-//
-// 一个实例可以有多个 edges；多个 edges 也可以指向同一个 target。
-// 边 id 用 `<srcVar>><tgtVar>>idx`（idx 是 attrs.edges 数组里的位置，区分多边场景）。
-export function deriveEdges() {
-  const edges = []
-  const insts = state.runtimeInstances
-  // v0.10 性能：预建 attrs → inst 反查表，O(n) → O(1) 查找（原来用 find 是 O(n*m)）
-  const attrsToInst = new Map()
-  for (const inst of insts) {
-    attrsToInst.set(inst.attrs, inst)
-  }
-  for (const inst of insts) {
-    const arr = inst.attrs.edges
-    if (!Array.isArray(arr)) continue
-    arr.forEach((e, idx) => {
-      if (!e || typeof e !== 'object') return
-      const refVal = e.target
-      if (!refVal || typeof refVal !== 'object') return
-      const targetInst = attrsToInst.get(refVal)
-      if (!targetInst) return
-      edges.push({
-        id: inst.varName + '>' + targetInst.varName + '>' + idx,
-        source_instance: inst.varName,
-        source_node: inst.varName,
-        source_ref: '',
-        source_port: '',
-        target_instance: targetInst.varName,
-        target_node: targetInst.varName,
-        target_attr: '',
-        target_port: '',
-        label: '',
-        relation: '',
-        description: e.description != null ? String(e.description) : '',
-        weight: 1,
-        metadata: {},
-      })
-    })
-  }
-  return edges
-}
 
 // ============ wrapInstance — 给 RuntimeInstance 加 v0.5 node 形状的 getter ============
 //
@@ -183,7 +137,7 @@ export function wrapInstance(inst) {
 }
 
 // 在 runSource 之后给所有 runtimeInstances 加 wrap
-function wrapAllInstances() {
+export function wrapAllInstances() {
   for (const inst of state.runtimeInstances) wrapInstance(inst)
 }
 
@@ -255,9 +209,8 @@ export function onExport() {
   URL.revokeObjectURL(a.href)
 }
 
-// ============ v0.5 向后兼容：把 exportJSON/importJSON 当作 sourceCode 包装 ============
-// 旧菜单/HTML 还在调 exportJSON/importJSON；v0.6 保留接口名，内部转 sourceCode
-export function exportJSON() { return exportSource() }
+// ============ v0.5 向后兼容：importJSON 是 sourceCode 包装 ============
+// 旧菜单/HTML 还在调 importJSON；v0.6 保留接口名，内部转 sourceCode
 export function importJSON(data) {
   // 接受 v0.6 {sourceCode} 或 v0.5 wrapper {version:3, sourceCode}
   if (data && typeof data.sourceCode === 'string') return importSource(data)

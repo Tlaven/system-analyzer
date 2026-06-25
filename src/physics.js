@@ -3,7 +3,7 @@ import { render } from './renderer.js'
 import { getNodeRect } from './utils.js'
 import { pushUndo } from './editor.js'
 import { saveConfig } from './config.js'
-import { deriveEdges } from './io.js'
+import { deriveEdges } from './codegraph.js'
 
 // 给没有位置的实例分配网格位置（导入新图 / 首次启动时调用）
 export function spreadUnpositioned() {
@@ -74,7 +74,7 @@ export function stepPhysics(){
       fy+=(ry/d)*f
     })
 
-    deriveEdges().forEach(e=>{
+    deriveEdges(state).forEach(e=>{
       if(e.source_node!==nd.id&&e.target_node!==nd.id)return
       const o=state.nodes.find(x=>x.id===(e.source_node===nd.id?e.target_node:e.source_node))
       if(!o)return
@@ -130,7 +130,7 @@ export function applyLayout(mode){
     // v0.10 circular 重做：Cuthill-McKee BFS 排序让相邻节点靠近，半径按节点数+尺寸联动
     const nodes = state.nodes
     if (nodes.length) {
-      const edges = deriveEdges()
+      const edges = deriveEdges(state)
       const adj = {}, inDeg = {}
       nodes.forEach(n => { adj[n.id] = []; inDeg[n.id] = 0 })
       edges.forEach(e => {
@@ -203,7 +203,7 @@ export function applyLayout(mode){
     }
   }else if(mode==='force'){
     // v0.10 force 重做：参数和 stepPhysics 统一 + 退火 + 同 class 聚类力 + gravity
-    const nodes = state.nodes, edges = deriveEdges()  // deriveEdges 只调一次
+    const nodes = state.nodes, edges = deriveEdges(state)  // deriveEdges 只调一次
     if (nodes.length) {
       const nn = nodes.length
       const k = 120 * Math.sqrt(nn)  // 理想距离（和 stepPhysics 一致）
@@ -306,7 +306,7 @@ export function applyLayout(mode){
     }
   }else if(mode==='hierarchical'){
     // v0.10 Sugiyama 简化版：Kahn 拓扑 + barycenter 交叉最小化 + 节点尺寸感知 + LR/TB
-    const nodes = state.nodes, edges = deriveEdges()
+    const nodes = state.nodes, edges = deriveEdges(state)
     const adj = {}, reverseAdj = {}, inDeg = {}
     nodes.forEach(n => { adj[n.id] = []; reverseAdj[n.id] = []; inDeg[n.id] = 0 })
     edges.forEach(e => {

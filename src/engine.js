@@ -13,8 +13,7 @@
 //   - 删除 compileAllNodes/compileInstances（旧 API no-op）
 
 import { state } from './state.js'
-import { render } from './renderer.js'
-import { deriveEdges } from './io.js'
+import { deriveEdges } from './codegraph.js'
 
 const EXEC_TIMEOUT_MS = 100
 
@@ -22,7 +21,7 @@ const EXEC_TIMEOUT_MS = 100
 let _topoCache = null, _topoKey = ''
 function topoKey() {
   const nk = state.runtimeInstances.map(i => i.varName).sort().join(',')
-  const ek = deriveEdges().map(e => e.source_instance + '>' + e.target_instance).sort().join(',')
+  const ek = deriveEdges(state).map(e => e.source_instance + '>' + e.target_instance).sort().join(',')
   return nk + '|' + ek
 }
 
@@ -36,7 +35,7 @@ export function topologicalSort() {
     inDeg[i.varName] = 0
     adj[i.varName] = []
   }
-  for (const e of deriveEdges()) {
+  for (const e of deriveEdges(state)) {
     if (adj[e.source_instance]) adj[e.source_instance].push(e.target_instance)
     if (inDeg[e.target_instance] !== undefined) inDeg[e.target_instance]++
   }
@@ -110,12 +109,13 @@ function evalTransforms() {
 
 // 独立 transform 求值入口,不受 execMode 抑制(ADR-003 OQ#2)。
 // setEdgeTransform 改完后直调,绕过 triggerPropagate 的 off 短路。
+// v0.13: 不再内部 render,调用方负责(panel._onTransformInput / panel.triggerPropagate)。
 export function runTransforms() {
   evalTransforms()
-  render()
 }
 
 // 从某实例开始按拓扑序调用方法，传播到下游
+// v0.13: 不再内部 render,调用方负责(panel.triggerPropagate / input.runPropagate)。
 export function propagate(startVarName) {
   const order = topologicalSort()
   const startIdx = startVarName ? order.indexOf(startVarName) : -1
@@ -132,7 +132,6 @@ export function propagate(startVarName) {
     }
   }
   evalTransforms()
-  render()
 }
 
 // 一步时间演化：每个实例先调用所有非 tick 方法，再调用 tick
@@ -157,7 +156,7 @@ export function stepAll() {
     tick: state.tickCount,
     instances: state.runtimeInstances.map(i => ({ id: i.varName, error: i._execError || null })),
   })
-  const stepBtn = document.getElementById('step-btn')
-  if (stepBtn) stepBtn.textContent = '▶ 下一步 (#' + state.tickCount + ')'
-  render()
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sa-tick', { detail: { tickCount: state.tickCount } }))
+  }
 }

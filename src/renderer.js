@@ -1,6 +1,6 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, NODE_RADIUS, PORT_R, ARROW_SZ, getPaletteColors } from './state.js'
 import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, rectEdge, formatScalar } from './utils.js'
-import { deriveEdges } from './io.js'
+import { deriveEdges } from './codegraph.js'
 
 export function drawGrid() {
   const pc = getPaletteColors()
@@ -32,7 +32,7 @@ export function updateTooltip() {
   if (state.mode || state.isDown) { tip.classList.add('hidden'); return }
   let title = '', desc = '', err = ''
   if (state.hoverEdge) {
-    const e = deriveEdges().find(ed => ed.id === state.hoverEdge)
+    const e = deriveEdges(state).find(ed => ed.id === state.hoverEdge)
     if (e) {
       // v0.9：边没有 ref 名，标题显示 `源 → 目标`，描述是 per-edge description
       title = (e.source_instance || '') + ' → ' + (e.target_instance || '')
@@ -98,7 +98,7 @@ export function render() {
   if (state.hoverNode && !state.mode && !state.isDown && !state.selNode) {
     hoverConnectedEdgeIds = new Set()
     hoverNeighborNodeIds = new Set()
-    for (const e of deriveEdges()) {
+    for (const e of deriveEdges(state)) {
       if (e.source_node === state.hoverNode.id || e.target_node === state.hoverNode.id) {
         hoverConnectedEdgeIds.add(e.id)
         if (e.source_node === state.hoverNode.id) hoverNeighborNodeIds.add(e.target_node)
@@ -112,7 +112,7 @@ export function render() {
   const isDimmed = () => hoverConnectedEdgeIds !== null
 
   // 多边同对的并行由端口分配处理（edgePts → getPortPos → computeNodePorts）
-  const _allEdges = deriveEdges()
+  const _allEdges = deriveEdges(state)
 
   for (const e of _allEdges) {
     const s = state.nodes.find(n => n.id === e.source_node), t = state.nodes.find(n => n.id === e.target_node)

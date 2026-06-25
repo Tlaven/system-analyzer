@@ -16,6 +16,65 @@ import { splitSource } from './parser.js'
 import { scanClass } from './scanner.js'
 import { getInstanceAttrKeys } from './attrkeys.js'
 
+// ============ 派生边视图 + lazy 缓存 ============
+//
+// v0.13: 从 io.js 迁入。原 io.js 14 处调用每次重算 O(n+m),且与 utils/engine/physics/renderer
+// 形成循环依赖。现改为 lazy + dirty flag:读时若 dirty 则重算并清 flag,runSource / 边变更
+// 入口调 invalidateEdges() 设 dirty=true。state 参数化(与 runSource 一致),保持 codegraph
+// 的 Node-runnable pure 边界(不 import state 单例)。
+//
+// 失效点(必须覆盖任何改动 runtimeInstances 或 attrs.edges 的入口):
+//   - runSource(本文件,自动覆盖 createNode / copyInstance / pasteInstance / load / import)
+//   - editor.delInstance / panel.{setEdgeTarget,setEdgeDescription,delCurrentEdge,addInstanceEdge,removeInstanceEdge}
+//   - input.createEdgeFromDrag
+let _edgesCache = null
+let _edgesDirty = true
+
+export function invalidateEdges() {
+  _edgesDirty = true
+}
+
+export function deriveEdges(state) {
+  if (!_edgesDirty && _edgesCache) return _edgesCache
+
+  const edges = []
+  const insts = state.runtimeInstances
+  const attrsToInst = new Map()
+  for (const inst of insts) {
+    attrsToInst.set(inst.attrs, inst)
+  }
+  for (const inst of insts) {
+    const arr = inst.attrs.edges
+    if (!Array.isArray(arr)) continue
+    arr.forEach((e, idx) => {
+      if (!e || typeof e !== 'object') return
+      const refVal = e.target
+      if (!refVal || typeof refVal !== 'object') return
+      const targetInst = attrsToInst.get(refVal)
+      if (!targetInst) return
+      edges.push({
+        id: inst.varName + '>' + targetInst.varName + '>' + idx,
+        source_instance: inst.varName,
+        source_node: inst.varName,
+        source_ref: '',
+        source_port: '',
+        target_instance: targetInst.varName,
+        target_node: targetInst.varName,
+        target_attr: '',
+        target_port: '',
+        label: '',
+        relation: '',
+        description: e.description != null ? String(e.description) : '',
+        weight: 1,
+        metadata: {},
+      })
+    })
+  }
+  _edgesCache = edges
+  _edgesDirty = false
+  return edges
+}
+
 // 创建 GraphStarter bridge。add(cls, explicitName) 内部自动生成 varName `<ClassName>_<n>`，
 // 或使用 explicitName。
 //
@@ -137,6 +196,7 @@ export function runSource(sourceCode, state) {
   }
 
   state.runtimeInstances.push(...bridge._instances)
+  invalidateEdges()
 }
 
 // 把当前 runtimeInstances 序列化回 sourceCode 字符串
@@ -230,8 +290,11 @@ export function _equal(a, b) {
   return false
 }
 
+// 序列化层：判断 class/var/attr key 是否需要加引号。Unicode 版因为 scanner(v0.10 起)
+// 允许中文 class 名，序列化必须能识别。**不要**与 utils.js 的 ASCII 版混用——那个是
+// UI 创建校验，CLAUDE.md 不变量要求 code identifiers 是 camelCase English，UI 层应拒中文。
 function isValidIdentifier(str) {
-  return /^[$_\p{L}][$_\p{L}\d]*$/u.test(str)
+  return /^[$$_\p{L}][$_\p{L}\d]*$/u.test(str)
 }
 
 function quoteKey(k) {

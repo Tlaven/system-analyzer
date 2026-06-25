@@ -13,11 +13,16 @@ import { save, syncCodeFromRuntime } from './io.js'
 import { propagate, runTransforms } from './engine.js'
 import { esc } from './utils.js'
 import { getInstanceAttrKeys } from './attrkeys.js'
-import { _equal } from './codegraph.js'
+import { _equal, invalidateEdges } from './codegraph.js'
 import { showModal } from './input.js'
 
 const $ = s => document.querySelector(s)
 const panel = $('#panel')
+
+// panel session 内只 push 一次 undo。每次 showEdgePanel / showNodePanel 入口重置 panelUndoPushed=false。
+function markUndo() {
+  if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+}
 const panelTitle = $('#panel-title')
 const panelBody = $('#panel-body')
 
@@ -26,10 +31,10 @@ function triggerPropagate(varName) {
   clearTimeout(_propagateTimer)
   _propagateTimer = setTimeout(() => {
     if (config.execMode === 'auto') {
-      propagate(varName)
+      propagate(varName); render()
     } else {
       // off / manual:transform 仍跑(ADR-003 OQ#2:transform 像 Excel formula)
-      runTransforms()
+      runTransforms(); render()
     }
   }, 300)
 }
@@ -71,16 +76,19 @@ function setEdgeTarget(inst, idx, targetVarName) {
   if (idx < 0 || idx >= edges.length) return
   if (!targetVarName) {
     edges[idx].target = null
+    invalidateEdges()
     return
   }
   const target = state.runtimeInstances.find(i => i.varName === targetVarName)
   edges[idx].target = target ? target.attrs : null
+  invalidateEdges()
 }
 
 function setEdgeDescription(inst, idx, description) {
   const edges = getInstanceEdges(inst)
   if (idx < 0 || idx >= edges.length) return
   edges[idx].description = description
+  invalidateEdges()
 }
 
 export function setPanelMode(mode) {
@@ -155,7 +163,7 @@ export function showEdgePanel(edgeId) {
     const descInp = document.getElementById('ep-desc')
     if (descInp) {
       descInp.oninput = function() {
-        if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+        markUndo()
         edge.description = this.value
         syncCodeFromRuntime(); render()
       }
@@ -166,10 +174,11 @@ export function showEdgePanel(edgeId) {
       _attachTransformAutocomplete(transformEl, edge, srcInst, tgtInst)
     }
     window.delCurrentEdge = function() {
-      if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+      markUndo()
       const arr = srcInst.attrs.edges
       if (Array.isArray(arr) && idx >= 0 && idx < arr.length) arr.splice(idx, 1)
       state.selEdge = null
+      invalidateEdges()
       syncCodeFromRuntime(); render(); hidePanel()
     }
   }
@@ -179,11 +188,11 @@ window.showEdgePanel = showEdgePanel
 // v0.12: transform oninput handler(autocomplete 插入后复用,保证与手敲行为一致)
 // v0.11 focus 契约:原地更新 #ep-terr,不 re-render panel,保留 textarea focus + 光标
 function _onTransformInput(textarea, edge) {
-  if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+  markUndo()
   edge.transform = textarea.value
   syncCodeFromRuntime()
   // 立即重算 transform(绕过 execMode,ADR-003 OQ#2:transform 像 Excel formula)
-  runTransforms()
+  runTransforms(); render()
   // v0.11: 原地更新错误显示
   const errEl = document.getElementById('ep-terr')
   if (errEl) {
@@ -493,7 +502,7 @@ export function showNodePanel(inst, highlightRef) {
       const colorInp = document.getElementById('np-color')
       if (colorInp) {
         colorInp.oninput = function() {
-          if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+          markUndo()
           state.visualState.colors[inst.varName] = this.value
           render(); save()
         }
@@ -501,7 +510,7 @@ export function showNodePanel(inst, highlightRef) {
       window.resetNodeColor = function() {
         const cur = state.selInstance
         if (!cur) return
-        if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+        markUndo()
         delete state.visualState.colors[cur.varName]
         const inp = document.getElementById('np-color')
         if (inp) inp.value = '#1976d2'
@@ -512,7 +521,7 @@ export function showNodePanel(inst, highlightRef) {
     const nameInp = document.getElementById('np-name')
     if (nameInp) {
       nameInp.oninput = function() {
-        if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+        markUndo()
         if (isType && cls) {
           cls.name = this.value
         } else {
@@ -525,7 +534,7 @@ export function showNodePanel(inst, highlightRef) {
     const descEl = document.getElementById('np-desc')
     if (descEl) {
       descEl.oninput = function() {
-        if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+        markUndo()
         if (isType && cls) {
           cls.description = this.value
         } else {
@@ -552,7 +561,7 @@ function _renderPropField({ propName, cont, inst, cls, codeMode, isType }) {
   row.className = 'field'
 
   function writeVal(newVal) {
-    if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+    markUndo()
     if (isType) {
       const oldDefault = cls.attrs[propName]
       cls.attrs[propName] = newVal
@@ -633,7 +642,7 @@ function _renderEdgesList(inst, codeMode) {
   cont.querySelectorAll('.edge-target-sel').forEach(sel => {
     sel.onchange = function() {
       const idx = parseInt(this.dataset.edgeIdx)
-      if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+      markUndo()
       setEdgeTarget(inst, idx, this.value)
       syncCodeFromRuntime(); render(); triggerPropagate(inst.varName)
     }
@@ -641,7 +650,7 @@ function _renderEdgesList(inst, codeMode) {
   cont.querySelectorAll('.edge-desc-input').forEach(inp => {
     inp.oninput = function() {
       const idx = parseInt(this.dataset.edgeIdx)
-      if (!state.panelUndoPushed) { pushUndo(); state.panelUndoPushed = true }
+      markUndo()
       setEdgeDescription(inst, idx, this.value)
       syncCodeFromRuntime(); render()
     }
@@ -774,6 +783,7 @@ export async function addInstanceEdge() {
   const target = state.runtimeInstances.find(i => i.varName === values.target)
   if (!Array.isArray(cur.attrs.edges)) cur.attrs.edges = []
   cur.attrs.edges.push({ target: target ? target.attrs : null, description: values.description })
+  invalidateEdges()
   syncCodeFromRuntime(); render()
   showNodePanel(cur)
 }
@@ -788,6 +798,7 @@ export function removeInstanceEdge(idx) {
   pushUndo()
   edges.splice(idx, 1)
   if (edges.length === 0) delete cur.attrs.edges
+  invalidateEdges()
   syncCodeFromRuntime(); render()
   showNodePanel(cur)
 }

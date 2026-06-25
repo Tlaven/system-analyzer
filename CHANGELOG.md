@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **engine.js 剥离 DOM/render,引擎层 pure 化**——`runTransforms` / `propagate` 不再内部调 `render()`,调用方(panel `triggerPropagate` / `_onTransformInput` / input `window.runPropagate`)补 render;`stepAll` 去掉直接读改 `#step-btn` DOM 的逻辑,改 `dispatchEvent('sa-tick')`,input.js 监听后更新按钮文本 + render。engine.js 不再 import renderer.js,理论上可被 Node 单元测试加载
+- **`deriveEdges` 从 io.js 迁入 codegraph.js + 加 lazy 缓存**——14 处调用方从 `deriveEdges()`(每次重算 O(n+m))改为 `deriveEdges(state)`(dirty flag + lazy 求值)。`runSource` 末尾自动失效;7 处写边入口(`editor.delInstance` / `panel.{setEdgeTarget,setEdgeDescription,delCurrentEdge,addInstanceEdge,removeInstanceEdge}` / `input.createEdgeFromDrag`)调 `invalidateEdges()`。副产物:砍掉 io↔{engine,physics,renderer,utils} 四条循环依赖 + utils.js → io.js 反向依赖。e2e 钩子 `window.invalidateEdges` 暴露
+- 抽取 panel.js 私有 `markUndo()`,消除 8 处 `if (!state.panelUndoPushed) { pushUndo(); ... }` 雷同代码
+- 导出 io.js `wrapAllInstances()`,替换 editor.js / codeview.js / input.js / main.js 共 5 处外部 `for...wrapInstance(inst)` 循环
+- 补 codegraph.js `isValidIdentifier` 注释,说明与 utils.js ASCII 版的职责差异(序列化层 Unicode vs UI 校验层 ASCII,由 CLAUDE.md 不变量"code identifiers are camelCase English"决定,勿统一)
+
+### Removed
+
+- `engine.js` 对 `renderer.js` 的 import + 内部 3 处 `render()` 直调 + `step-btn` DOM 读写
+- `io.js deriveEdges` 函数(已迁入 codegraph.js)
+- `editor.js selectNode` 兼容别名(0 调用方,`delNode` 仍被 panel.js HTML onclick 用而保留)
+- `io.js exportJSON` 函数(v0.5 wrapper,0 调用方,`importJSON` 仍活)
+
 ## [0.12] - 2026-06-25
 
 ### Added

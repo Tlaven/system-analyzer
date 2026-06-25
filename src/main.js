@@ -1,6 +1,6 @@
 import { state, config } from './state.js'
 import { render } from './renderer.js'
-import { load, save, importSource, wrapInstance } from './io.js'
+import { load, save, importSource, wrapAllInstances } from './io.js'
 import { runSource } from './codegraph.js'
 import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
 import { fitToView, spreadUnpositioned } from './physics.js'
@@ -46,7 +46,7 @@ function init() {
   if (!loaded) {
     // 第一次启动：state.sourceCode 默认是 DEFAULT_BOOTSTRAP，但 runtimeInstances 为空 → runSource
     runSource(state.sourceCode, state)
-    for (const inst of state.runtimeInstances) wrapInstance(inst)
+    wrapAllInstances()
     const titleEl = document.getElementById('title-text')
     if (titleEl) titleEl.textContent = state.graphTitle
   }

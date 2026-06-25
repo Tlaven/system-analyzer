@@ -3,7 +3,8 @@ import { render, updateTooltip } from './renderer.js'
 import { pushUndo, undo, selectInstance, selectEdge, deselectAll, delNode, delEdge } from './editor.js'
 window.selectInstance = selectInstance
 import { startPhysics, stopPhysics, applyLayout, fitToView } from './physics.js'
-import { importJSON, save, onExport, onNew, shareURL, deriveEdges, resetRuntime, syncCodeFromRuntime, wrapInstance } from './io.js'
+import { importJSON, save, onExport, onNew, shareURL, resetRuntime, syncCodeFromRuntime, wrapInstance, wrapAllInstances } from './io.js'
+import { deriveEdges, invalidateEdges } from './codegraph.js'
 import { toggleCodeView, commitCodeNow, setCodeViewReadOnly } from './codeview.js'
 import { loadConfig, saveConfig, applyTheme } from './config.js'
 import { showNodePanel, showEdgePanel } from './panel.js'
@@ -16,7 +17,8 @@ import { runSource, _equal, formatValue } from './codegraph.js'
 window.state = state
 window.config = config
 window.propagate = propagate
-window.deriveEdges = deriveEdges
+window.deriveEdges = () => deriveEdges(state)
+window.invalidateEdges = invalidateEdges
 window.__testImport = importJSON
 window.setEditMode = setEditMode
 // v0.7 Phase 5: 暴露给测试用的辅助函数
@@ -55,7 +57,7 @@ window.setExecMode = function(val) {
   if (pr) pr.style.display = val === 'manual' ? 'flex' : 'none'
   render()
 }
-window.runPropagate = function(instId) { propagate(instId) }
+window.runPropagate = function(instId) { propagate(instId); render() }
 
 // v0.7 Phase 2：UI 模式新建/复制节点入口（Code 模式不响应）
 window.createNode = createNode
@@ -127,7 +129,7 @@ function setEditMode(mode) {
     // 重新 runSource 同步 state.classes 与新（无方法体）sourceCode
     try {
       runSource(state.sourceCode, state)
-      for (const inst of state.runtimeInstances) wrapInstance(inst)
+      wrapAllInstances()
     } catch (e) {
       alert('反向构建失败：' + e.message)
       updateEditModeUI()
@@ -405,7 +407,7 @@ export async function createNodeAt(worldX, worldY) {
     alert('新建节点失败：' + e.message)
     return
   }
-  for (const inst of state.runtimeInstances) wrapInstance(inst)
+  wrapAllInstances()
   const newInst = state.runtimeInstances.find(i => i.varName === varName)
   save()
   render()
@@ -473,7 +475,7 @@ function pasteInstanceInternal(srcInst, newVar) {
     alert('复制失败：' + e.message)
     return
   }
-  for (const inst of state.runtimeInstances) wrapInstance(inst)
+  wrapAllInstances()
   const newInst = state.runtimeInstances.find(i => i.varName === newVar)
   save()
   render()
@@ -498,6 +500,7 @@ async function createEdgeFromDrag(srcInst, targetInst) {
   pushUndo()
   if (!Array.isArray(srcInst.attrs.edges)) srcInst.attrs.edges = []
   srcInst.attrs.edges.push({ target: targetInst.attrs, description: values.description })
+  invalidateEdges()
   syncCodeFromRuntime(); render()
   showNodePanel(srcInst)
 }
@@ -603,7 +606,7 @@ Object.defineProperty(window, 'selEdge', {
   get() {
     const id = state.selEdge
     if (!id) return null
-    return deriveEdges().find(e => e.id === id) || null
+    return deriveEdges(state).find(e => e.id === id) || null
   },
   set(v) {
     if (v && typeof v === 'object') state.selEdge = v.id
@@ -617,6 +620,13 @@ Object.defineProperty(window, 'selEdge', {
 
 export function initInput() {
   const canvas = document.getElementById('canvas')
+
+  // v0.13: 监听引擎 sa-tick 事件,更新 step-btn 文本 + 重绘(engine.js 不再直读 DOM)
+  window.addEventListener('sa-tick', (e) => {
+    const stepBtn = document.getElementById('step-btn')
+    if (stepBtn) stepBtn.textContent = '▶ 下一步 (#' + e.detail.tickCount + ')'
+    render()
+  })
 
   document.addEventListener('click', function(e) {
     if (!e.target.closest('.menu-group') && !e.target.closest('.dropdown-menu') && !e.target.closest('.menu-trigger')) {

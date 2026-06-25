@@ -182,6 +182,7 @@ console.log('\n测试 5：边从 attrs.edges 派生')
   await page.evaluate(() => {
     const s = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     s.attrs.edges = []
+    window.invalidateEdges()
   })
   const after = await page.evaluate(() => window.deriveEdges().length)
   check('清空 Source_1.edges 后边数 = 1', after === 1, after)
@@ -191,6 +192,7 @@ console.log('\n测试 5：边从 attrs.edges 派生')
     const s = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     const p = window.state.runtimeInstances.find(i => i.varName === 'Processor_1')
     s.attrs.edges = [{ target: p.attrs, description: '数据流向下游' }]
+    window.invalidateEdges()
   })
   const restored = await page.evaluate(() => window.deriveEdges().length)
   check('恢复 Source_1.edges 后边数 = 2', restored === 2, restored)

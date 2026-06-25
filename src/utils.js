@@ -1,5 +1,5 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, PORT_R, PORT_HIT, EDGE_HIT, isDark } from './state.js'
-import { deriveEdges } from './io.js'
+import { deriveEdges } from './codegraph.js'
 
 // minimal 模式 → 圆形几何；medium/full → 圆角矩形
 function isCircleMode() {
@@ -44,7 +44,7 @@ export function getNodeRadius(n) {
   const w = measureText(label, '14px "Microsoft YaHei",sans-serif')
   const base = Math.max(22, w / 2 + 8)
   let ec = 0
-  for (const e of deriveEdges()) {
+  for (const e of deriveEdges(state)) {
     if (e.source_node === n.varName || e.target_node === n.varName) ec++
   }
   return Math.min(55, base + ec * 2)
@@ -123,7 +123,7 @@ export function rectEdge(r,tx,ty){
 export function computeNodePorts(n, dir) {
   if (config.infoLevel === 'minimal') return new Map()
   const r = getNodeRect(n)
-  const edges = deriveEdges()
+  const edges = deriveEdges(state)
   const related = dir === 'out'
     ? edges.filter(e => e.source_node === n.id)
     : edges.filter(e => e.target_node === n.id)
@@ -139,7 +139,7 @@ export function computeNodePorts(n, dir) {
 // 关键：in 和 out 边在同侧时共享一组等分位置（否则 N 同侧的 in/out 端口可能落到同位置）
 // 所以这里**同时**收集 N 的 in + out 边分组等分，再按 dir 过滤返回
 function computeNodePortsCurve(n, dir, r) {
-  const allEdges = deriveEdges()
+  const allEdges = deriveEdges(state)
   const bySide = { right: [], left: [], top: [], bottom: [] }
   for (const e of allEdges) {
     if (e.source_node !== n.id && e.target_node !== n.id) continue
@@ -457,7 +457,7 @@ export function hitHandle(x, y) {
   return null
 }
 export function hitEdge(x, y) {
-  const edges = deriveEdges()
+  const edges = deriveEdges(state)
   const isCurveMode = config.edgeStyle === 'curve'
   for (let i = edges.length - 1; i >= 0; i--) {
     const e = edges[i], s = state.nodes.find(n => n.id === e.source_node), t = state.nodes.find(n => n.id === e.target_node)

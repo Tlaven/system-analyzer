@@ -6,8 +6,8 @@
 
 import { state, MAX_UNDO } from './state.js'
 import { render } from './renderer.js'
-import { save, syncCodeFromRuntime, wrapInstance } from './io.js'
-import { runSource } from './codegraph.js'
+import { save, syncCodeFromRuntime, wrapAllInstances } from './io.js'
+import { runSource, invalidateEdges } from './codegraph.js'
 import { hidePanel } from './panel.js'
 
 // ============ Undo ============
@@ -32,7 +32,7 @@ export function undo() {
   if (titleEl) titleEl.textContent = state.graphTitle
 
   runSource(state.sourceCode, state)
-  for (const inst of state.runtimeInstances) wrapInstance(inst)
+  wrapAllInstances()
 
   state.selVarName = null
   state.selEdge = null
@@ -64,6 +64,7 @@ export function delInstance(inst) {
   if (!inst) return
   pushUndo()
   state.runtimeInstances = state.runtimeInstances.filter(i => i !== inst)
+  invalidateEdges()
   // 清理其他实例指向被删实例的引用（身份比较）
   for (const other of state.runtimeInstances) {
     const cls = state.classes[other.className]
@@ -94,6 +95,5 @@ export function delEdge(e) {
   syncCodeFromRuntime(); render()
 }
 
-// 兼容别名：旧代码用 delNode/selectNode
+// 兼容别名：旧 HTML onclick 还在调 delNode
 export const delNode = delInstance
-export const selectNode = selectInstance
