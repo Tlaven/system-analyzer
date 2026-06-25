@@ -374,7 +374,8 @@ function _attachTransformAutocomplete(textarea, edge, srcInst, tgtInst) {
   })
   textarea.addEventListener('blur', () => setTimeout(closePopup, 150))
 
-  window.__epAutocompleteState = () => ({
+  window.__sa_test = window.__sa_test || {}
+  window.__sa_test.epAutocompleteState = () => ({
     open,
     candidates: candidates.slice(),
     selected: selectedIdx,

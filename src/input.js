@@ -20,7 +20,8 @@ window.config = config
 window.propagate = propagate
 window.deriveEdges = () => deriveEdges(state)
 window.invalidateEdges = invalidateEdges
-window.__testImport = importJSON
+window.__sa_test = window.__sa_test || {}
+window.__sa_test.importJSON = importJSON
 window.setEditMode = setEditMode
 // v0.7 Phase 5: 暴露给测试用的辅助函数
 window.selectEdge = selectEdge

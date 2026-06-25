@@ -3,17 +3,19 @@
 // 原本 panel→input 反向 import showModal 是设计异味,本文件斩断那条箭头。
 //
 // showModal 是纯 DOM 函数,不依赖任何 module-level state。唯一外部契约是
-// window.__modalPrefill(e2e 测试钩子,可预填表单值绕过交互)。
+// window.__sa_test.modalPrefill(e2e 测试钩子,可预填表单值绕过交互)。
+
+window.__sa_test = window.__sa_test || {}
 
 // 通用 modal:返回 Promise<values | null>(取消时 null)
 // fields: [{ name, label, type: 'text'|'datalist', default, options?, validate? }]
 //   validate(value, allValues) 返回字符串错误信息或 null
-// 测试钩子:设置 window.__modalPrefill = { fieldName: value, ... } 可绕过 UI 直接返回预填值
+// 测试钩子:设置 window.__sa_test.modalPrefill = { fieldName: value, ... } 可绕过 UI 直接返回预填值
 export function showModal({ title, fields, submitLabel = '确定' }) {
   // 测试钩子:绕过 UI
-  if (window.__modalPrefill) {
-    const prefill = window.__modalPrefill
-    window.__modalPrefill = null
+  if (window.__sa_test.modalPrefill) {
+    const prefill = window.__sa_test.modalPrefill
+    window.__sa_test.modalPrefill = null
     for (const f of fields) {
       const v = prefill[f.name]
       if (v === undefined) continue

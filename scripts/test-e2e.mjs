@@ -113,7 +113,7 @@ console.log('测试 1：空画布加载')
 console.log('\n测试 2：importSource 加载 v0.9 sample')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '测试图' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '测试图' })
   }, V09_SAMPLE)
   const stats = await page.evaluate(() => ({
     instanceCount: window.state.runtimeInstances.length,
@@ -201,7 +201,7 @@ console.log('\n测试 5：边从 attrs.edges 派生')
 console.log('\n测试 6：serializeCode 输出 class field 3 字段（无 static 无 constructor 无 edges）')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '测试图' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '测试图' })
   }, V09_SAMPLE)
   const stats = await page.evaluate(() => {
     const src = window.state.sourceCode
@@ -250,7 +250,7 @@ console.log('\n测试 7：resetRuntime 丢弃运行时 mutation')
 console.log('\n测试 8：持久化 save/load round-trip (version 6)')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '持久化测试' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '持久化测试' })
   }, V09_SAMPLE)
   await page.evaluate(() => window.save())
   await page.reload()
@@ -301,7 +301,7 @@ console.log('\n测试 9：旧 v5 格式硬切换')
 console.log('\n测试 10：双模式切换 UI ↔ Code')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '模式切换测试' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '模式切换测试' })
   }, V09_SAMPLE)
 
   await page.evaluate(() => window.setEditMode('code'))
@@ -320,13 +320,13 @@ console.log('\n测试 10：双模式切换 UI ↔ Code')
 console.log('\n测试 11：新建节点（已存在 class）')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '新建测试' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '新建测试' })
   }, V09_SAMPLE)
   await page.evaluate(() => {
-    window.__modalPrefill = { className: 'Source', varName: 'Source_2' }
+    window.__sa_test.modalPrefill = { className: 'Source', varName: 'Source_2' }
     window.createNode()
   })
-  await page.waitForFunction(() => !window.__modalPrefill, { timeout: 1000 }).catch(() => {})
+  await page.waitForFunction(() => !window.__sa_test.modalPrefill, { timeout: 1000 }).catch(() => {})
   await new Promise(r => setTimeout(r, 200))
   const stats = await page.evaluate(() => ({
     sourceCount: window.state.runtimeInstances.filter(i => i.className === 'Source').length,
@@ -341,13 +341,13 @@ console.log('\n测试 11：新建节点（已存在 class）')
 console.log('\n测试 12：新建节点（新 class）——空 class 模板用 3 字段（无 name 无 edges）')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '新建 class 测试' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '新建 class 测试' })
   }, V09_SAMPLE)
   await page.evaluate(() => {
-    window.__modalPrefill = { className: 'BrandNew', varName: 'BrandNew_1' }
+    window.__sa_test.modalPrefill = { className: 'BrandNew', varName: 'BrandNew_1' }
     window.createNode()
   })
-  await page.waitForFunction(() => !window.__modalPrefill, { timeout: 1000 }).catch(() => {})
+  await page.waitForFunction(() => !window.__sa_test.modalPrefill, { timeout: 1000 }).catch(() => {})
   await new Promise(r => setTimeout(r, 200))
   const stats = await page.evaluate(() => ({
     hasClass: !!window.state.classes.BrandNew,
@@ -374,15 +374,15 @@ console.log('\n测试 12：新建节点（新 class）——空 class 模板用 
 console.log('\n测试 13：复制节点（继承 override 和 edges 数组）')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '复制测试' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '复制测试' })
   }, V09_SAMPLE)
   dialogMsgs.length = 0
   await page.evaluate(() => {
-    window.__modalPrefill = { varName: 'Source_1_copy' }
+    window.__sa_test.modalPrefill = { varName: 'Source_1_copy' }
     const src = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     window.copyInstance(src)
   })
-  await page.waitForFunction(() => !window.__modalPrefill, { timeout: 1000 }).catch(() => {})
+  await page.waitForFunction(() => !window.__sa_test.modalPrefill, { timeout: 1000 }).catch(() => {})
   await new Promise(r => setTimeout(r, 300))
   if (dialogMsgs.length) console.log('  [dialog captured]', dialogMsgs)
   const stats = await page.evaluate(() => {
@@ -408,14 +408,14 @@ console.log('\n测试 13：复制节点（继承 override 和 edges 数组）')
 console.log('\n测试 14：实例模式加属性 → inst.attrs + sourceCode 多行赋值')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '加属性测试' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '加属性测试' })
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     window.showNodePanel(s1)
     window.setPanelMode('instance')
-    window.__modalPrefill = { key: 'priority', value: 'high' }
+    window.__sa_test.modalPrefill = { key: 'priority', value: 'high' }
     window.addProperty()
   }, V09_SAMPLE)
-  await page.waitForFunction(() => !window.__modalPrefill, { timeout: 1000 }).catch(() => {})
+  await page.waitForFunction(() => !window.__sa_test.modalPrefill, { timeout: 1000 }).catch(() => {})
   await new Promise(r => setTimeout(r, 200))
   const stats = await page.evaluate(() => {
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
@@ -434,14 +434,14 @@ console.log('\n测试 14：实例模式加属性 → inst.attrs + sourceCode 多
 console.log('\n测试 15：类型模式加属性 → cls.attrs + 实例自动同步')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '类型加属性' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '类型加属性' })
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     window.showNodePanel(s1)
     window.setPanelMode('type')
-    window.__modalPrefill = { key: 'threshold', value: '10' }
+    window.__sa_test.modalPrefill = { key: 'threshold', value: '10' }
     window.addProperty()
   }, V09_SAMPLE)
-  await page.waitForFunction(() => !window.__modalPrefill, { timeout: 1000 }).catch(() => {})
+  await page.waitForFunction(() => !window.__sa_test.modalPrefill, { timeout: 1000 }).catch(() => {})
   await new Promise(r => setTimeout(r, 200))
   const stats = await page.evaluate(() => {
     const cls = window.state.classes.Source
@@ -460,7 +460,7 @@ console.log('\n测试 15：类型模式加属性 → cls.attrs + 实例自动同
 console.log('\n测试 16：实例模式删属性 → 仅从 inst.attrs 删（class 默认保留）')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '删属性' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '删属性' })
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     s1.attrs.extraField = 'temp'
     window.syncCodeFromRuntime()
@@ -483,7 +483,7 @@ console.log('\n测试 16：实例模式删属性 → 仅从 inst.attrs 删（cla
 console.log('\n测试 17：实例级 description 编辑 → sourceCode 多行赋值')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: 'desc' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 'desc' })
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     window.showNodePanel(s1)
     window.setPanelMode('instance')
@@ -505,7 +505,7 @@ console.log('\n测试 17：实例级 description 编辑 → sourceCode 多行赋
 console.log('\n测试 18：类型模式默认值传播')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: 't18' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 't18' })
     window.state.sourceCode = window.state.sourceCode +
       '\nconst Source_2 = GraphStarter.add(Source, "Source_2")'
     window.runSource(window.state.sourceCode, window.state)
@@ -535,14 +535,14 @@ console.log('\n测试 18：类型模式默认值传播')
 console.log('\n测试 19：实例模式加边 → push 到 inst.attrs.edges')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: 't19' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 't19' })
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     window.showNodePanel(s1)
     window.setPanelMode('instance')
-    window.__modalPrefill = { target: 'Database_1', description: '直连数据库' }
+    window.__sa_test.modalPrefill = { target: 'Database_1', description: '直连数据库' }
     window.addInstanceEdge()
   }, V09_SAMPLE)
-  await page.waitForFunction(() => !window.__modalPrefill, { timeout: 1000 }).catch(() => {})
+  await page.waitForFunction(() => !window.__sa_test.modalPrefill, { timeout: 1000 }).catch(() => {})
   await new Promise(r => setTimeout(r, 300))
   const stats = await page.evaluate(() => {
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
@@ -566,7 +566,7 @@ console.log('\n测试 19：实例模式加边 → push 到 inst.attrs.edges')
 console.log('\n测试 20：selEdge 活过 runSource')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: 't20' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 't20' })
     const edges = window.deriveEdges()
     window.selectEdge(edges[0])
     window.runSource(window.state.sourceCode, window.state)
@@ -585,7 +585,7 @@ console.log('\n测试 20：selEdge 活过 runSource')
 console.log('\n测试 21：Code 模式 panel 全只读')
 {
   const stats = await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: 't21' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 't21' })
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     window.showNodePanel(s1)
     window.setEditMode('code')
@@ -608,7 +608,7 @@ console.log('\n测试 21：Code 模式 panel 全只读')
 console.log('\n测试 22：Ctrl+C/V 复制粘贴（不弹 modal，varName _1 起）')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: 't22' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 't22' })
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     window.selectInstance(s1)
   }, V09_SAMPLE)
@@ -627,7 +627,7 @@ console.log('\n测试 22：Ctrl+C/V 复制粘贴（不弹 modal，varName _1 起
     return {
       hasCopy: !!copy,
       rateInherited: copy?.attrs.rate === 5,
-      noModalDialog: !window.__modalPrefill,
+      noModalDialog: !window.__sa_test.modalPrefill,
     }
   })
   check('Source_1_1 实例存在（varName _1 起）', stats.hasCopy === true, stats.hasCopy)
@@ -667,7 +667,7 @@ Source_1.edges = [
   { target: Mid_1, description: '再到 Mid（多边同目标）' }
 ]`
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '多边测试' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '多边测试' })
   }, multiSample)
   const stats = await page.evaluate(() => {
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
@@ -694,20 +694,20 @@ Source_1.edges = [
 console.log('\n测试 24：拖边交互 → 创建新边')
 {
   await page.evaluate((src) => {
-    window.__testImport({ sourceCode: src, title: '拖边测试' })
+    window.__sa_test.importJSON({ sourceCode: src, title: '拖边测试' })
     // Source_1 当前已有 1 边到 Processor_1，再拖一条到 Database_1
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
     const d1 = window.state.runtimeInstances.find(i => i.varName === 'Database_1')
     // 模拟 createEdgeFromDrag（拖边 mouseup 后调用）
-    window.__modalPrefill = { description: '拖拽创建的边' }
+    window.__sa_test.modalPrefill = { description: '拖拽创建的边' }
     // 直接调用内部逻辑（createEdgeFromDrag 是 internal，但能通过模拟走通）
     // 这里走更直接的 API：showNodePanel + addInstanceEdge
     window.showNodePanel(s1)
     window.setPanelMode('instance')
-    window.__modalPrefill = { target: 'Database_1', description: '拖拽创建的边' }
+    window.__sa_test.modalPrefill = { target: 'Database_1', description: '拖拽创建的边' }
     window.addInstanceEdge()
   }, V09_SAMPLE)
-  await page.waitForFunction(() => !window.__modalPrefill, { timeout: 1000 }).catch(() => {})
+  await page.waitForFunction(() => !window.__sa_test.modalPrefill, { timeout: 1000 }).catch(() => {})
   await new Promise(r => setTimeout(r, 300))
   const stats = await page.evaluate(() => {
     const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
@@ -727,7 +727,7 @@ console.log('\n测试 24：拖边交互 → 创建新边')
 console.log('\n测试 25：infoLevel 切换 → 形状随之变（无 nodeShape）')
 {
   const stats = await page.evaluate(() => {
-    window.__testImport({ sourceCode: '', title: 't25' })
+    window.__sa_test.importJSON({ sourceCode: '', title: 't25' })
     return {
       noNodeShape: !('nodeShape' in window.config),
       noSelShapeEl: !document.getElementById('sel-shape'),
@@ -751,7 +751,7 @@ class Tgt26 {
 const Src26_1 = GraphStarter.add(Src26)
 const Tgt26_1 = GraphStarter.add(Tgt26)
 Src26_1.edges = [{ target: Tgt26_1, description: '边26', transform: "target['y'] = 1" }]`
-    window.__testImport({ sourceCode: src, title: 't26' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 't26' })
 
     window.showEdgePanel('Src26_1>Tgt26_1>0')
 
@@ -815,7 +815,7 @@ Src28_1.edges = [
   { target: T28a_1, description: 'a', transform: "throw new Error('errA')" },
   { target: T28b_1, description: 'b', transform: "throw new Error('errB')" }
 ]`
-    window.__testImport({ sourceCode: src, title: 't28' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 't28' })
 
     window.runTransforms()
 
@@ -845,14 +845,14 @@ class Tgt29 {
 const Src29_1 = GraphStarter.add(Src29)
 const Tgt29_1 = GraphStarter.add(Tgt29)
 Src29_1.edges = [{ target: Tgt29_1, description: '边29' }]`
-    window.__testImport({ sourceCode: src, title: 't29' })
+    window.__sa_test.importJSON({ sourceCode: src, title: 't29' })
     window.showEdgePanel('Src29_1>Tgt29_1>0')
     const ta = document.getElementById('ep-transform')
     ta.focus()
     ta.value = "source['"
     ta.setSelectionRange(8, 8)
     ta.dispatchEvent(new Event('input', { bubbles: true }))
-    const s = window.__epAutocompleteState()
+    const s = window.__sa_test.epAutocompleteState()
     return {
       open: s.open,
       candidates: s.candidates,
@@ -869,12 +869,12 @@ console.log('\n测试 30：↑↓ 键盘导航 popup')
 {
   const result = await page.evaluate(() => {
     const ta = document.getElementById('ep-transform')
-    const s1 = window.__epAutocompleteState().selected
+    const s1 = window.__sa_test.epAutocompleteState().selected
     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
-    const s2 = window.__epAutocompleteState().selected
+    const s2 = window.__sa_test.epAutocompleteState().selected
     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
-    const s3 = window.__epAutocompleteState().selected
-    const count = window.__epAutocompleteState().candidates.length
+    const s3 = window.__sa_test.epAutocompleteState().selected
+    const count = window.__sa_test.epAutocompleteState().candidates.length
     return { s1, s2, s3, count }
   })
   check('初始选中 = 0', result.s1 === 0)
@@ -894,7 +894,7 @@ console.log('\n测试 31：Enter 插入选中 key')
       value: ta.value,
       caret: ta.selectionStart,
       edgeTransform: srcInst.attrs.edges[0].transform,
-      popupOpen: window.__epAutocompleteState().open,
+      popupOpen: window.__sa_test.epAutocompleteState().open,
     }
   })
   check("textarea 含 source['value']", result.value.includes("source['value']"), result.value)
@@ -910,11 +910,11 @@ console.log('\n测试 32：Esc 关闭 popup,内容不变,focus 保留')
     ta.value = "target['"
     ta.setSelectionRange(8, 8)
     ta.dispatchEvent(new Event('input', { bubbles: true }))
-    const opened = window.__epAutocompleteState().open
+    const opened = window.__sa_test.epAutocompleteState().open
     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     return {
       openedAfterInput: opened,
-      closedAfterEsc: window.__epAutocompleteState().open === false,
+      closedAfterEsc: window.__sa_test.epAutocompleteState().open === false,
       valueAfterEsc: ta.value,
       activeIsTextarea: document.activeElement === ta,
     }
@@ -932,11 +932,11 @@ console.log('\n测试 33：候选过滤(输入部分 key)')
     ta.value = "source['ra"
     ta.setSelectionRange(11, 11)
     ta.dispatchEvent(new Event('input', { bubbles: true }))
-    const s1 = window.__epAutocompleteState()
+    const s1 = window.__sa_test.epAutocompleteState()
     ta.value = "source['xyz"
     ta.setSelectionRange(12, 12)
     ta.dispatchEvent(new Event('input', { bubbles: true }))
-    const s2 = window.__epAutocompleteState()
+    const s2 = window.__sa_test.epAutocompleteState()
     return { candidatesRa: s1.candidates, openRa: s1.open, openXyz: s2.open }
   })
   check("'ra' 过滤到 ['rate']", JSON.stringify(result.candidatesRa) === JSON.stringify(['rate']), JSON.stringify(result.candidatesRa))
