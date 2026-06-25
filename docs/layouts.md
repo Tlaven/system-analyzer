@@ -88,7 +88,7 @@
 - 被 physics.js 在每帧（elastic 模式）和每次迭代（force 200 次、hierarchical 每节点）调用——核心瓶颈
 - 反查 target 用 `runtimeInstances.find(i => i.attrs === refVal)`，O(n) 按对象身份匹配
 
-**重做时必须配套加缓存层**：按 `runtimeInstances` 引用身份哈希失效，`runSource` 后清缓存。
+**v0.13 已解决**：`deriveEdges` 迁入 `codegraph.js` + lazy 缓存(dirty flag + `invalidateEdges()`),7 处写边入口 + runSource 自动失效。
 
 ---
 
@@ -200,7 +200,7 @@
 4. **grid 新增**——`spreadUnpositioned` 的 class 感知版本，工作量小，可以和 circular 并行做。
 
 5. **配套基础设施**（贯穿所有重做）：
-   - `deriveEdges` 缓存层（按 runtimeInstances 引用身份哈希失效）
+   - `deriveEdges` 缓存层（按 runtimeInstances 引用身份哈希失效）— **v0.13 已落地**
    - `getNodeRect` 模式感知间距（所有布局共用）
    - `config.layoutDirection` 全局配置（hierarchical/force 联动）
 
