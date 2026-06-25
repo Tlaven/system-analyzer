@@ -11,6 +11,7 @@
 - 抽取 panel.js 私有 `markUndo()`,消除 8 处 `if (!state.panelUndoPushed) { pushUndo(); ... }` 雷同代码
 - 导出 io.js `wrapAllInstances()`,替换 editor.js / codeview.js / input.js / main.js 共 5 处外部 `for...wrapInstance(inst)` 循环
 - 补 codegraph.js `isValidIdentifier` 注释,说明与 utils.js ASCII 版的职责差异(序列化层 Unicode vs UI 校验层 ASCII,由 CLAUDE.md 不变量"code identifiers are camelCase English"决定,勿统一)
+- **`showModal` 抽到新 `src/modal.js`**——斩断 `panel.js → input.js` 反向上行依赖(panel.js:17 改 import 源)。showModal 是 UI 原语(input.js 调:创建/复制节点、拖边;panel.js 调:加属性、加边),原本 panel 反向 import 事件层是设计异味,现 5 个 call site 都改从 `./modal.js` 进。`__modalPrefill` 测试钩子作为 showModal 内部契约跟着走
 
 ### Removed
 

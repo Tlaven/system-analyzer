@@ -14,7 +14,7 @@ import { propagate, runTransforms } from './engine.js'
 import { esc } from './utils.js'
 import { getInstanceAttrKeys } from './attrkeys.js'
 import { _equal, invalidateEdges } from './codegraph.js'
-import { showModal } from './input.js'
+import { showModal } from './modal.js'
 
 const $ = s => document.querySelector(s)
 const panel = $('#panel')
