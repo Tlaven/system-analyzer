@@ -240,3 +240,32 @@ minimal 模式下，边可能被路径上的其他圆形节点遮挡。这是**�
 | **布局层** | `docs/layouts.md` | 节点应该放在哪里（四种布局 + grid 新增）|
 
 每层独立演化，互不耦合。`config.infoLevel` 控制渲染层，`config.edgeStyle` 控制路由层，`config.layout` 控制布局层。
+
+---
+
+## 10. 显示通道扩展计划（planned，2026-09-14）
+
+> 方向型记录（状态流转约定见 CLAUDE.md 演化期规则）。准入判据三条：画面上的事实须回答 (1) 这张图在做什么 2_FN56 ) 下一步谁动了什么 (3) 现在坏不坏/为什么。回答不了的进 tooltip/panel。
+
+### 新增（按优先级）
+
+| # | 通道 | 判据（数据现成） | 档位 | 状态 |
+|---|---|---|---|---|
+| 1 | transform 活性标记（箭头变形 / ƒ 角标） | `edge.transform` 非空 | **三档全含（含 minimal）**——AI 链接打开默认就是 minimal 档 | planned |
+| 2 | 方法体存在圆点 | `cls.methods.length > 0` | 三档通用小角标 | planned |
+| 3 | 边 description 标签（中段截断文字） | `edge.description` | 仅 medium/full，minimal 保持鸟瞰 | planned |
+| 4 | override 浅标记（属性行值淡下划线） | `key in inst.attrs` 且非 `key in cls.attrs` | medium/full 属性行 | planned |
+| 5 | 执行脉冲（0.5s 波扫） | propagate/stepAll 触发 | 全档 | planned（可后置） |
+
+### 去掉（假 affordance 清除）
+
+| # | 项 | 理由 | 状态 |
+|---|---|---|---|
+| A | Code 模式下的拖柄 | 拖柄始终绘制（renderer 无 editMode 检查），但 Code 模式拖边建边被禁（`createEdgeFromDrag` early-return）——显示层撒谎。Code 模式选中只留选中环 | planned |
+| B | Code 模式下"双击空白新建"空 hint | 同上，指向被禁交互 | planned |
+
+### 明确不做
+
+AI diff 视图 / class 图例面板 / weight 流量粗细（模型语义未定） / 坐标数字 / 执行历史 timeline（时序哲学未定）。
+
+设计前提：全部新通道**不扩模型**——从现有 runtime 对象（edge.transform / edge.description / inst.attrs / cls.methods / state.editMode）直接可读；净效应 = 5 新通道 + 2 假 affordance 清除。
