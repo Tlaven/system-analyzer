@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **做什么:** 节点 + 边 + 属性的可视化编辑,支持 UI 拖拽编辑和 Code 代码编辑双模式,边级 transform 表达式(轻量响应式——改上游 attr 自动重算下游),Canvas 渲染(三档信息密度 + 多种布线 + 多种布局)。
 
-**不做什么:** 不做后端服务(纯静态单文件);不做用户系统(无登录无云端同步,localStorage + URL hash 分享);不做实时多人协作;不做时序动画(执行引擎的 step 推进保持不激活,但单次重算通过 `propagate` / `evalTransforms` 走响应式路径)。
+**不做什么:** 不做后端服务(纯静态单文件);不做用户系统(无登录无云端同步,localStorage + URL hash 分享);不做实时多人协作;不做**全自动演示式动画**(边样式 dashFlow/particleFlow 属样式层选项,不是产品方向;ADR-005 相应拆分"时序动画"歧义)。执行引擎的 step 推进原为不激活状态,现确定为**执行观测支柱方向**(交互式步进/时序记录/环路标记,ADR-005,实现进度见 docs/roadmap.md);单次重算 propagate/evalTransforms 响应式路径持续可用。
 
 ## [为什么] — 设计哲学
 
@@ -106,6 +106,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 - **`sa_data.version` 必须是 6**。其他版本(v0.5–v0.8)与 v0.9 实例级 edges 模型不兼容,`load()` 检测到旧版本会丢弃并清空 `sa_data`,走 DEFAULT_BOOTSTRAP(空串)。
 - **边可携带 transform 表达式(ADR-003)**。transform 是 `attrs.edges[i].transform` 上的可选 JS 语句片段字符串,求值方式 `new Function('source','target', body).call(null, srcAttrs, tgtAttrs)`。硬约束:(a) 属性访问**一律 bracket access**(`source['总人数']`,不用点访问——与中文 key、JSON 序列化、panel UI 对齐);(b) 表达式**只能引用边两端 attrs**(不扩展 topo sort,跨节点引用靠手补边);(c) **不受 `execMode === 'off'` 抑制**(transform 像 Excel formula,是属性模型的一部分,`panel.js` 改完走独立 `runTransforms()` 路径绕过 `triggerPropagate` 的 off 短路);(d) `evalTransforms()` 不走 topo 序也不跳过环——声明式公式各跑一次不会无限循环。序列化边形状从 `{ target, description }` 扩展为 `{ target, description, transform? }`。
 - **UI labels are in Chinese; identifiers 分层支持 Unicode(ADR-004)**——序列化/序列化全链路、Code 模式、中文 attr key/class 名/varName 均支持 Unicode(`\p{L}`);仅 UI 新建节点 modal 的 className/varName 输入校验保持 ASCII(`utils.js` 版 `isValidIdentifier`)。`isValidIdentifier` 因此存在两份(codegraph Unicode 版 / utils ASCII 版),**不允许第三个实现**;放宽 UI 入口须新 ADR。
+- **演化层数据不序列化(ADR-005)**——traces/探测边/execHistory 等"运行时事实"不入 sourceCode、不入 URL hash;它们是易失观测层,`resetRuntime` 即清空。sourceCode 只承载作者意图(声明结构+声明边+方法体),观察值不回写。
 
 ## Documentation
 
