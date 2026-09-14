@@ -30,6 +30,8 @@ ADR 是挡回重复提议的唯一挡箭牌。
 
 | 编号 | 标题 | 状态 | 日期 |
 |---|---|---|---|
+| [ADR-004](adr-004-unicode-identifiers.md) | 中文/Unicode 标识符支持(回溯补记) | accepted | 2026-09-14 |
+| [ADR-003](adr-003-edge-transform-expressions.md) | 边级 transform 表达式 | accepted | 2026-06-24 |
 | [ADR-001](adr-001-instance-level-edges.md) | 边模型从 class 级迁到实例级 | accepted | 2026-06-18 |
 | [ADR-002](adr-002-dual-mode-editing.md) | 双模式编辑(UI / Code) | accepted | 2026-06-15 |
 

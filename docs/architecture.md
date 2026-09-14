@@ -288,4 +288,4 @@ v0.6/v0.8 时代的"命名端口"被 v0.9 砍掉——边是实例级数组,端�
 18. **Vanilla JS + Canvas 2D,无框架**(esbuild 仅 dev)。部署产物是单文件 `dist/index.html`。
 19. **class 定义写在 sourceCode 字符串里**(启动时 `new Function` 执行),不在 bundle 中作为 module import。
 20. **Class method bodies forbid `fetch` / `XMLHttpRequest` / `import` / `require`**(文档约定,无运行时强制)。仅在 Code 模式存在;UI 模式 serializeCode 永不输出方法体。
-21. **UI labels are in Chinese; code identifiers are camelCase English.**
+21. **UI labels are in Chinese; identifiers 分层支持 Unicode(详见 ADR-004)**——序列化/Code 模式全支持 Unicode;仅 UI 新建 modal 输入校验保持 ASCII;`isValidIdentifier` 两份实现(utils ASCII / codegraph Unicode),不允许第三个。
