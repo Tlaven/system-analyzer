@@ -970,6 +970,56 @@ console.log('\n测试 34：v0.11 focus 契约守卫(autocomplete 操作不重建
   check('#ep-terr 仍存在(原地更新机制)', result.errElExists === true)
 }
 
+console.log('\n测试 35：importSource 守卫(version 校验 + editMode 尊重 + loadError 保护)')
+{
+  // 35a: 旧版本数据被拒绝
+  const rejectResult = await page.evaluate(() => {
+    try {
+      window.__sa_test.importJSON({ version: 5, sourceCode: 'class A { description = "x" }', title: '旧' })
+      return { threw: false }
+    } catch (e) {
+      return { threw: true, msg: e.message }
+    }
+  })
+  check('旧 version 抛错', rejectResult.threw === true, rejectResult)
+
+  // 35b: editMode: 'code' 的数据被尊重
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ version: 6, sourceCode: src, title: 'codeMode', editMode: 'code' })
+  }, V09_SAMPLE)
+  const mode = await page.evaluate(() => ({
+    editMode: window.state.editMode,
+    codePanelHidden: document.getElementById('code-panel').classList.contains('hidden'),
+  }))
+  check('editMode=code 被尊重', mode.editMode === 'code', mode)
+
+  // 35c: loadError 保护 — 毁掉 sourceCode 让 reload 时 runSource 失败,save 应被拒
+  await page.evaluate(() => {
+    window.state.loadError = '模拟载入失败'
+    window.state.sourceCode = 'class Broken { bad syntax !!!'
+    localStorage.setItem('sa_data', JSON.stringify({ version: 6, sourceCode: '有效数据', graphId: 'g1', graphTitle: '保护测试' }))
+    window.save()
+  })
+  const protected_ = await page.evaluate(() => JSON.parse(localStorage.getItem('sa_data')).sourceCode)
+  check('loadError 下 save() 不覆盖 sa_data', protected_ === '有效数据', protected_)
+
+  // 35d: clearLoadError 恢复保存
+  await page.evaluate(() => {
+    window.state.loadError = null
+    window.state.graphTitle = '恢复验证'
+  })
+  const restored = await page.evaluate(() => {
+    window.save()
+    return JSON.parse(localStorage.getItem('sa_data')).graphTitle
+  })
+  check('清除 loadError 后 save 恢复', restored === '恢复验证', restored)
+
+  // 清场:回正常 import
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: '清场' })
+  }, V09_SAMPLE)
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

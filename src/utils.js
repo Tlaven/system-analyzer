@@ -1,5 +1,5 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, PORT_R, PORT_HIT, EDGE_HIT, isDark } from './state.js'
-import { deriveEdges } from './codegraph.js'
+import { deriveEdges, nodeIndex } from './codegraph.js'
 
 // minimal 模式 → 圆形几何；medium/full → 圆角矩形
 function isCircleMode() {
@@ -140,11 +140,12 @@ export function computeNodePorts(n, dir) {
 // 所以这里**同时**收集 N 的 in + out 边分组等分，再按 dir 过滤返回
 function computeNodePortsCurve(n, dir, r) {
   const allEdges = deriveEdges(state)
+  const byId = nodeIndex(state)
   const bySide = { right: [], left: [], top: [], bottom: [] }
   for (const e of allEdges) {
     if (e.source_node !== n.id && e.target_node !== n.id) continue
     const isOut = e.source_node === n.id
-    const o = state.nodes.find(x => x.id === (isOut ? e.target_node : e.source_node))
+    const o = byId.get(isOut ? e.target_node : e.source_node)
     if (!o) continue
     const dx = o.x - n.x, dy = o.y - n.y
     let side
@@ -383,23 +384,10 @@ export function findOrthogonalChannel(P1, P2, s, t) {
 }
 export function screenToWorld(sx,sy){return{x:(sx-state.viewX)/state.viewScale,y:(sy-state.viewY)/state.viewScale}}
 export function cCoords(e){const r=document.getElementById('canvas').getBoundingClientRect();return screenToWorld(e.clientX-r.left,e.clientY-r.top)}
-export function getEdgeStyle(rel){
-  if(isDark){
-    switch(rel){
-      case'+':return{color:'#66bb6a',sel:'#4caf50'}
-      case'-':return{color:'#ef5350',sel:'#e53935'}
-      case'=':return{color:'#42a5f5',sel:'#1e88e5'}
-      case'?':return{color:'#ffa726',sel:'#ff9800'}
-      default:return{color:'#666',sel:'#64b5f6'}
-    }
-  }
-  switch(rel){
-    case'+':return{color:'#2e7d32',sel:'#1b5e20'}
-    case'-':return{color:'#c62828',sel:'#b71c1c'}
-    case'=':return{color:'#1565c0',sel:'#0d47a1'}
-    case'?':return{color:'#e65100',sel:'#bf360c'}
-    default:return{color:'#9e9e9e',sel:'#1976d2'}
-  }
+export function getEdgeStyle(){
+  // v0.5 的 relation 配色(+/-/=/?)随派生边 relation 恒 '' 而不可达,收敛到单一底色
+  if(isDark)return{color:'#666',sel:'#64b5f6'}
+  return{color:'#9e9e9e',sel:'#1976d2'}
 }
 export function wrapText(ctx,text,maxW){
   const lines=[];let line=''
@@ -458,9 +446,10 @@ export function hitHandle(x, y) {
 }
 export function hitEdge(x, y) {
   const edges = deriveEdges(state)
+  const byId = nodeIndex(state)
   const isCurveMode = config.edgeStyle === 'curve'
   for (let i = edges.length - 1; i >= 0; i--) {
-    const e = edges[i], s = state.nodes.find(n => n.id === e.source_node), t = state.nodes.find(n => n.id === e.target_node)
+    const e = edges[i], s = byId.get(e.source_node), t = byId.get(e.target_node)
     if (!s || !t) continue
     const { p1, p2 } = edgePts(s, t, e)
     if (isCurveMode) {

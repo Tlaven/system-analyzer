@@ -18,7 +18,7 @@ import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { state } from './state.js'
 import { runSource } from './codegraph.js'
-import { wrapAllInstances, save } from './io.js'
+import { wrapAllInstances, save, clearLoadError } from './io.js'
 import { render } from './renderer.js'
 import { pushUndo } from './editor.js'
 
@@ -99,6 +99,7 @@ function commitCode(code) {
     wrapAllInstances()
     state.sourceCode = code
     lastAppliedCode = code
+    clearLoadError()
     clearError()
     save()
     render()

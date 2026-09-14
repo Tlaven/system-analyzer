@@ -3,7 +3,7 @@ import { render } from './renderer.js'
 import { getNodeRect } from './utils.js'
 import { pushUndo } from './editor.js'
 import { saveConfig } from './config.js'
-import { deriveEdges } from './codegraph.js'
+import { deriveEdges, nodeIndex } from './codegraph.js'
 
 // 给没有位置的实例分配网格位置（导入新图 / 首次启动时调用）
 export function spreadUnpositioned() {
@@ -46,7 +46,7 @@ export function stepPhysics(){
   const damp=0.85
 
   state.nodes.forEach(nd=>{
-    if(nd.vx===undefined){nd.vx=0;nd.vy=0;nd.pinned=false}
+    if(nd.vx===undefined){nd.vx=0;nd.vy=0}
   })
   const cx=(window.innerWidth/2-state.viewX)/state.viewScale
   const cy=(window.innerHeight/2-state.viewY)/state.viewScale
@@ -59,7 +59,6 @@ export function stepPhysics(){
   const temp=Math.max(0,baseTemp+state.dragHeat)
 
   state.nodes.forEach(nd=>{
-    if(nd.pinned)return
     let fx=0,fy=0
 
     fx+=(cx-nd.x)*gravity
@@ -74,9 +73,10 @@ export function stepPhysics(){
       fy+=(ry/d)*f
     })
 
+    const byId=nodeIndex(state)
     deriveEdges(state).forEach(e=>{
       if(e.source_node!==nd.id&&e.target_node!==nd.id)return
-      const o=state.nodes.find(x=>x.id===(e.source_node===nd.id?e.target_node:e.source_node))
+      const o=byId.get(e.source_node===nd.id?e.target_node:e.source_node)
       if(!o)return
       const rx=o.x-nd.x,ry=o.y-nd.y
       const d=Math.max(Math.hypot(rx,ry),1)
@@ -110,7 +110,7 @@ export function startPhysics(){
   stopPhysics()
   state.physTime=0
   if(!state.nodes.length)return
-  if(!('vx'in state.nodes[0]))state.nodes.forEach(n=>{n.vx=0;n.vy=0;n.pinned=false})
+  if(!('vx'in state.nodes[0]))state.nodes.forEach(n=>{n.vx=0;n.vy=0})
   const step=()=>{
     if(config.positionMode==='elastic')stepPhysics()
     state.physTime++

@@ -11,7 +11,7 @@ import { showNodePanel, showEdgePanel } from './panel.js'
 import { showModal } from './modal.js'
 import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName } from './utils.js'
 import { stepAll, propagate, runTransforms } from './engine.js'
-import { splitSource } from './parser.js'
+import { splitSource, isSourceCodeProgrammatic } from './parser.js'
 import { runSource, _equal, formatValue } from './codegraph.js'
 
 // 测试与调试钩子
@@ -71,28 +71,6 @@ window.instantiateClass = createNode
 // ============================================================
 // v0.7 双模式切换：UI 编辑 ↔ 代码
 // ============================================================
-
-// 启发式检测 sourceCode 是否含程序化结构或方法体（Code→UI 切换时用）
-// 含：for/while/if/switch/function/=> 控制流，或 class 内非 constructor 方法
-function isSourceCodeProgrammatic(code) {
-  if (!code) return false
-  // 控制流关键字（在 class 外的启动段也算）
-  const controlFlowRe = /\b(?:for\s*\(|while\s*\(|if\s*\(|switch\s*\(|function\b|=>)/
-  if (controlFlowRe.test(code)) return true
-  // class 内非 constructor 方法
-  try {
-    const { classes } = splitSource(code)
-    for (const c of classes) {
-      // 匹配 `<ident>(<params>) {` 且不是 constructor
-      const methodRe = /\b([a-zA-Z_$][\w$]*)\s*\([^)]*\)\s*\{/g
-      let m
-      while ((m = methodRe.exec(c.source))) {
-        if (m[1] !== 'constructor') return true
-      }
-    }
-  } catch (_) { /* splitSource 失败：保守起见视为程序化 */ return true }
-  return false
-}
 
 // 切换编辑模式
 function setEditMode(mode) {

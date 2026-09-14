@@ -165,6 +165,9 @@ export const state = {
   // 图元数据
   graphId: 'g_' + Date.now(), graphTitle: '系统模型',
 
+  // 载入失败保护:runSource 对持久化 sourceCode 失败时置位,阻止 save() 覆盖用户数据
+  loadError: null,
+
   // 撤销栈（sourceCode 字符串快照）
   undoStack: [],
   panelUndoPushed: false,

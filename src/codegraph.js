@@ -29,9 +29,21 @@ import { getInstanceAttrKeys } from './attrkeys.js'
 //   - input.createEdgeFromDrag
 let _edgesCache = null
 let _edgesDirty = true
+let _nodeIdxCache = null
 
 export function invalidateEdges() {
   _edgesDirty = true
+  _nodeIdxCache = null
+}
+
+// varName -> inst 查找索引,与 deriveEdges 共用失效点(实例集合只在 runSource/删改时变)
+// 替代热路径上反复的 state.nodes.find(n => n.id === x)(O(边x节点) -> O(1))
+export function nodeIndex(state) {
+  if (!_nodeIdxCache) {
+    _nodeIdxCache = new Map()
+    for (const inst of state.runtimeInstances) _nodeIdxCache.set(inst.varName, inst)
+  }
+  return _nodeIdxCache
 }
 
 export function deriveEdges(state) {

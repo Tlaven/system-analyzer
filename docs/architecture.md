@@ -216,7 +216,7 @@ Code 模式交互:
 
 **执行引擎** (`src/engine.js`). 三层入口:(1) `topologicalSort()` 基于 `deriveEdges()` 排序实例;(2) `propagate(startVarName)` / `stepAll()` 按拓扑序调用方法体(UI 模式 class 无方法体 → 方法调用是 no-op,等 Code 模式 AI 实现方法体后才有效果);(3) `evalTransforms()` / `runTransforms()` 跑边级 transform 表达式(ADR-003,**跨模式生效**——transform 是 attrs 模型的一部分,不是方法体)。`evalTransforms` 不走 topo 序也不跳过环:声明式公式各跑一次不会无限循环,按 `runtimeInstances` 定义顺序跑(source 通常先于 target)。`propagate()` 内部末尾也调一次 `evalTransforms()`,所以 auto 模式重算方法体后会顺带跑 transform。
 
-**持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。
+**持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。**载入失败保护**:`load()` 反序列化成功但 `runSource` 失败时置 `state.loadError`,`save()` 拒绝覆盖 `sa_data`(防止空画布的下一次编辑抹掉用户图);`loadError` 由成功操作清除(onNew / importSource / codeview commitCode 成功)。**载入守卫**:importSource 校验 version(≠6 拒绝)、尊重数据里的 editMode、UI 模式 + 程序化 sourceCode 时 confirm 推荐切 Code 模式载入。
 
 **旧格式硬切换。** v0.9 之前的 `sa_data`(version !== 6,含 v0.5 / v0.6 / v0.7 / v0.8)与 v0.9 不兼容(实例级 edges 模型与历史 class.edges + null 槽风格不兼容)。`load()` 检测到旧版本会丢弃并清空 `sa_data`,返回 false → 走 DEFAULT_BOOTSTRAP(空)。
 

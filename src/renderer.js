@@ -1,6 +1,6 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, NODE_RADIUS, PORT_R, ARROW_SZ, getPaletteColors } from './state.js'
-import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, rectEdge, formatScalar } from './utils.js'
-import { deriveEdges } from './codegraph.js'
+import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, formatScalar } from './utils.js'
+import { deriveEdges, nodeIndex } from './codegraph.js'
 
 export function drawGrid() {
   const pc = getPaletteColors()
@@ -113,13 +113,14 @@ export function render() {
 
   // 多边同对的并行由端口分配处理（edgePts → getPortPos → computeNodePorts）
   const _allEdges = deriveEdges(state)
+  const _byId = nodeIndex(state)
 
   for (const e of _allEdges) {
-    const s = state.nodes.find(n => n.id === e.source_node), t = state.nodes.find(n => n.id === e.target_node)
+    const s = _byId.get(e.source_node), t = _byId.get(e.target_node)
     if (!s || !t) continue
     const { p1, p2 } = edgePts(s, t, e), isSel = state.selEdge === e.id
     const isHovered = state.hoverEdge === e.id
-    const es = getEdgeStyle(e.relation)
+    const es = getEdgeStyle()
     const es2 = config.edgeStyle
     const isCurve = es2 === 'curve'
     const isHighlighted = isDimmed() && hoverConnectedEdgeIds.has(e.id)
@@ -203,17 +204,50 @@ export function render() {
       : (isCurve && curveCubic)
         ? Math.atan2(p2.y - curveCubic.cp2.y, p2.x - curveCubic.cp2.x)
         : Math.atan2(p2.y - p1.y, p2.x - p1.x)
-    if (config.edgeAnim === 'dashFlow') {
+    // 动画沿实际路由(直线/折线/曲线)走,不再无视布线重画直连
+    if (config.edgeAnim !== 'none') {
       ctx.save()
-      ctx.setLineDash([8, 6]); ctx.lineDashOffset = -state.physTime * 0.8
-      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y)
-      ctx.strokeStyle = ec; ctx.lineWidth = isSel ? 2.5 : 1.8; ctx.stroke()
+      if (config.edgeAnim === 'dashFlow') {
+        ctx.setLineDash([8, 6]); ctx.lineDashOffset = -state.physTime * 0.8
+        ctx.beginPath()
+        if (route) {
+          ctx.moveTo(route[0].x, route[0].y)
+          for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y)
+        } else if (isCurve && curveCubic) {
+          ctx.moveTo(P1.x, P1.y)
+          ctx.bezierCurveTo(curveCubic.cp1.x, curveCubic.cp1.y, curveCubic.cp2.x, curveCubic.cp2.y, P2.x, P2.y)
+        } else {
+          ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y)
+        }
+        ctx.lineWidth = 1.8; ctx.stroke()
+      } else {
+        // particleFlow:沿路径参数 t 取点
+        const t = ((state.physTime * 0.05) % 1 + 1) % 1
+        let px, py
+        if (route) {
+          // 折线分段插值
+          let total = 0
+          const lens = []
+          for (let i = 1; i < route.length; i++) {
+            const l = Math.hypot(route[i].x - route[i-1].x, route[i].y - route[i-1].y)
+            lens.push(l); total += l
+          }
+          let acc = t * total
+          let i = 0
+          while (i < lens.length - 1 && acc > lens[i]) { acc -= lens[i]; i++ }
+          const f = lens[i] ? acc / lens[i] : 0
+          px = route[i].x + (route[i+1].x - route[i].x) * f
+          py = route[i].y + (route[i+1].y - route[i].y) * f
+        } else if (isCurve && curveCubic) {
+          const u = 1 - t
+          px = u*u*u*P1.x + 3*u*u*t*curveCubic.cp1.x + 3*u*t*t*curveCubic.cp2.x + t*t*t*P2.x
+          py = u*u*u*P1.y + 3*u*u*t*curveCubic.cp1.y + 3*u*t*t*curveCubic.cp2.y + t*t*t*P2.y
+        } else {
+          px = p1.x + (p2.x - p1.x) * t; py = p1.y + (p2.y - p1.y) * t
+        }
+        ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fillStyle = ec; ctx.fill()
+      }
       ctx.restore()
-    }
-    if (config.edgeAnim === 'particleFlow') {
-      const t = ((state.physTime * 0.05) % 1 + 1) % 1
-      const px = p1.x + (p2.x - p1.x) * t, py = p1.y + (p2.y - p1.y) * t
-      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fillStyle = ec; ctx.fill()
     }
     ctx.fillStyle = ec
     ctx.beginPath(); ctx.moveTo(p2.x, p2.y)
@@ -352,20 +386,6 @@ export function render() {
       const ey = r.y + r.h + 12
       ctx.fillStyle = '#e53935'; ctx.fillText('⚠ ' + truncateText(ctx, n.error, r.w - 16), r.x + 8, Math.min(ey, window.innerHeight))
       ctx.restore()
-    }
-    // isEmpty stub indicator (orange dot — AI should fill implementation)
-    if (n.compiled && n.compiled.methods) {
-      let hasEmpty = false
-      for (const method of Object.values(n.compiled.methods)) {
-        if (method.isEmpty) { hasEmpty = true; break }
-      }
-      if (hasEmpty) {
-        ctx.save()
-        ctx.beginPath(); ctx.arc(r.x + r.w - 6, r.y + 6, 4, 0, Math.PI * 2)
-        ctx.fillStyle = '#ff9800'; ctx.fill()
-        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.stroke()
-        ctx.restore()
-      }
     }
     // v0.9：选中节点画 4 个拖柄圆点（上右下左中点）— 拖出边的入口
     // 圆形 / 矩形都画；不再依赖 inputs/outputs（v0.9 无端口概念）

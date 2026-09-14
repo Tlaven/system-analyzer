@@ -36,7 +36,7 @@ function init() {
       save()
       loaded = true
     } catch (e) {
-      console.warn('URL hash 解析失败', e)
+      alert('分享链接载入失败：' + e.message + '\n\n将回退到本地已保存的图(如有)。')
     }
     history.replaceState(null, '', location.pathname)
   }

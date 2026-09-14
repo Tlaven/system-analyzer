@@ -15,7 +15,18 @@ import { pushUndo } from './editor.js'
 import { applyLayout, fitToView, spreadUnpositioned } from './physics.js'
 import { toB64 } from './utils.js'
 import { runSource, serializeCode } from './codegraph.js'
+import { isSourceCodeProgrammatic } from './parser.js'
 import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
+
+// ============ loadError 保护 ============
+// sourceCode 存了但 runSource 失败(语法错/悬空引用)时:
+//   - load() 返回 false 走空画布,但 sa_data 完好
+//   - save() 拒绝覆盖 sa_data,否则空图下一次编辑就抹掉用户数据
+//   - loadError 由"成功操作"清除:onNew / importJSON / codeview 修好 commitCode
+export function hasLoadError() { return !!state.loadError }
+export function clearLoadError() {
+  if (state.loadError) { state.loadError = null; save() }
+}
 
 // ============ wrapInstance — 给 RuntimeInstance 加 v0.5 node 形状的 getter ============
 //
@@ -139,6 +150,27 @@ export function importSource(data) {
   if (typeof data !== 'object' || typeof data.sourceCode !== 'string') {
     throw new Error('无效格式，期望 {sourceCode: "..."}')
   }
+  // 版本校验:带 version 字段的数据必须符合当前模型(version 6 = 实例级 edges)
+  if (data.version !== undefined && data.version !== 6) {
+    throw new Error('旧版本数据 (v' + data.version + ') 与当前实例级 edges 模型不兼容')
+  }
+  // 载入后 save() 可能合法发生,先清 loadError(这是一个"成功操作")
+  state.loadError = null
+
+  // 尊重 URL/导入数据里的 editMode(llms.txt 指示 AI 显式设置)
+  state.editMode = data.editMode === 'code' ? 'code' : 'ui'
+  // UI 模式 + 程序化 sourceCode = "panel 一编辑就丢方法体"的静默陷阱。
+  // 给用户一次选择机会:推荐切 Code 模式(不丢),硬选继续则承认丢弃代价。
+  if (state.editMode === 'ui' && isSourceCodeProgrammatic(data.sourceCode)) {
+    const asCode = confirm(
+      '即将载入的 sourceCode 含方法体或控制流。\n\n' +
+      '建议切到代码模式载入(panel 编辑不会丢失它们)。\n' +
+      '确定 = 以代码模式载入(推荐)\n' +
+      '取消 = 仍以 UI 模式载入(一旦 panel 编辑,方法体将被静默丢弃)'
+    )
+    state.editMode = asCode ? 'code' : 'ui'
+  }
+
   state.sourceCode = data.sourceCode
   if (data.visualState) {
     state.visualState = {
@@ -165,6 +197,7 @@ export function onNew() {
   if (state.sourceCode && state.sourceCode !== DEFAULT_BOOTSTRAP &&
       !confirm('确定要新建吗？当前图将丢失。')) return
   pushUndo()
+  state.loadError = null
   state.sourceCode = DEFAULT_BOOTSTRAP
   state.visualState = { positions: {}, colors: {} }
   state.selVarName = null
@@ -201,6 +234,10 @@ export function importJSON(data) {
 
 // ============ Persistence ============
 export function save() {
+  if (state.loadError) {
+    console.warn('[save] loadError 未清除,拒绝覆盖 sa_data(用户数据保护)')
+    return
+  }
   try {
     localStorage.setItem('sa_data', JSON.stringify({
       version: 6,
@@ -238,7 +275,10 @@ export function load() {
     wrapAllInstances()
     return true
   } catch (e) {
-    console.warn('[load] 加载失败', e)
+    // sa_data 完好 + save() 被保护:用户修复后刷新即可找回;或新建/导入走 onNew/importJSON
+    state.loadError = e.message
+    console.warn('[load] 加载失败(数据未破坏,已阻止覆盖保存)', e)
+    alert('本地图加载失败：' + e.message + '\n\n原始数据已保留在 localStorage。\n可切到"代码"模式修复语法/引用错误,或新建/导入其他图。')
     return false
   }
 }
