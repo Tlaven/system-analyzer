@@ -168,7 +168,7 @@ class 默认值永远保留;实例 override 单独写在启动代码里(每个�
 ### 双向转换器
 
 - `code → graph`:`runSource(state.sourceCode, state)` in `src/codegraph.js`。`new Function('GraphStarter', sourceCode)(bridge)` 执行,bridge.add(cls, explicitName) 内部自动生成 varName
-- `graph → code`:`serializeCode(state)` in `src/codegraph.js`。class 段用实例级 class field 语法(description / attrs 必输出,name 仅在非空时输出,**无 edges 字段**,**不输出方法体**);启动段从 `runtimeInstances` 反向构建(add 调用 + 每个 override 字段单独一行 + `X.edges = [{ target: Y, description: '...' }]` 数组赋值,边有 transform 时追加 `transform: '...'` 字段)。**仅 UI 模式调**
+- `graph → code`:`serializeCode(state)` in `src/codegraph.js`。class 段用实例级 class field 语法(description / attrs 必输出,name 仅在非空时输出,**无 edges 字段**,**不输出方法体**);启动段从 `runtimeInstances` 反向构建(add 调用**始终带显式 varName 第二参数**——varName 是 visualState/panelMode/clipboard 的键,序列化不得依赖 makeBridge 计数器顺序,否则 reload 后 varName 漂移、布局颜色丢失 + 每个 override 字段单独一行 + `X.edges = [{ target: Y, description: '...' }]` 数组赋值,边有 transform 时追加 `transform: '...'` 字段)。**悬空 target(指向已删实例)序列化为 `target: null`**——写 varName 会产生 ReferenceError 使整图无法加载。**仅 UI 模式调**
 
 ---
 

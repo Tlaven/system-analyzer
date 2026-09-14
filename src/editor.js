@@ -7,7 +7,7 @@
 import { state, MAX_UNDO } from './state.js'
 import { render } from './renderer.js'
 import { save, syncCodeFromRuntime, wrapAllInstances } from './io.js'
-import { runSource, invalidateEdges } from './codegraph.js'
+import { runSource, invalidateEdges, deriveEdges } from './codegraph.js'
 import { hidePanel } from './panel.js'
 
 // ============ Undo ============
@@ -65,14 +65,16 @@ export function delInstance(inst) {
   pushUndo()
   state.runtimeInstances = state.runtimeInstances.filter(i => i !== inst)
   invalidateEdges()
-  // 清理其他实例指向被删实例的引用（身份比较）
+  // 清理其他实例指向被删实例的入边（target 是被删实例的 attrs 对象引用）
+  // 不清理的话:deriveEdges 只是隐掉边,但 serializeCode 会输出悬空 target varName,
+  // 重载 runSource 直接 ReferenceError,整图加载失败
   for (const other of state.runtimeInstances) {
-    const cls = state.classes[other.className]
-    if (!cls || !cls.edges) continue
-    for (const edge of cls.edges) {
-      if (other.attrs[edge.name] === inst.attrs) {
-        other.attrs[edge.name] = null
-      }
+    const arr = other.attrs.edges
+    if (!Array.isArray(arr)) continue
+    const kept = arr.filter(e => !(e && e.target === inst.attrs))
+    if (kept.length !== arr.length) {
+      if (kept.length) other.attrs.edges = kept
+      else delete other.attrs.edges
     }
   }
   // 清理 visualState.positions/colors 中的孤儿条目
@@ -82,16 +84,34 @@ export function delInstance(inst) {
   syncCodeFromRuntime(); render()
 }
 
-// v0.7: 删除边 = 清空源实例的引用槽（让 ref 不再指向目标，边自然消失）
+// v0.9: 删除边 = 从源实例 attrs.edges 数组 splice 掉该条目
+// 参数兼容两种形态:derived edge 对象 或 edgeId 字符串(keyboard Delete 传 selEdge 字符串)
 export function delEdge(e) {
   if (!e) return
-  pushUndo()
-  const src = state.runtimeInstances.find(i => i.varName === e.source_instance)
-  if (src) {
-    src.attrs[e.source_ref] = null
+  const ed = (typeof e === 'string')
+    ? deriveEdges(state).find(x => x.id === e)
+    : e
+  if (!ed) return
+  const src = state.runtimeInstances.find(i => i.varName === ed.source_instance)
+  if (!src) return
+  const tgtInst = state.runtimeInstances.find(i => i.varName === ed.target_instance)
+  const edges = Array.isArray(src.attrs.edges) ? src.attrs.edges : []
+  // 先按 id 尾部 idx 定位,再校验 target 身份一致(数组可能已变动,防 idx 漂移)
+  const idxFromId = parseInt(String(ed.id).split('>').pop(), 10)
+  let hit = -1
+  if (Number.isInteger(idxFromId) && edges[idxFromId] && edges[idxFromId].target === (tgtInst && tgtInst.attrs)) {
+    hit = idxFromId
+  } else {
+    for (let i = 0; i < edges.length; i++) {
+      if (edges[i] && edges[i].target === (tgtInst ? tgtInst.attrs : null)) { hit = i; break }
+    }
   }
-  // v0.7 Phase 5: selEdge 现在存 id 字符串
-  if (state.selEdge === e.id) deselectAll()
+  if (hit === -1) return
+  pushUndo()
+  edges.splice(hit, 1)
+  if (!edges.length) delete src.attrs.edges
+  invalidateEdges()
+  if (state.selEdge === ed.id) deselectAll()
   syncCodeFromRuntime(); render()
 }
 

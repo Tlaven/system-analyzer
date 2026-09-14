@@ -228,11 +228,14 @@ export function serializeCode(_state) {
   const bootLines = []
 
   // 1. GraphStarter.add 调用（按 runtimeInstances 顺序）
+  // 显式名始终输出：不依赖 makeBridge 的计数器顺序，round-trip 后 varName 恒定
+  // （visualState / panelMode / clipboard 都按 varName 键，varName 漂移 = 布局颜色丢失）
   for (const inst of state.runtimeInstances) {
-    bootLines.push('const ' + inst.varName + ' = GraphStarter.add(' + inst.className + ')')
+    bootLines.push('const ' + inst.varName + ' = GraphStarter.add(' + inst.className + ', ' + formatValue(inst.varName) + ')')
   }
 
   // 2. attrs override（非 edges、非默认值）+ edges 数组赋值
+  const liveAttrs = new Set(state.runtimeInstances.map(i => i.attrs))
   for (const inst of state.runtimeInstances) {
     const cls = state.classes[inst.className]
     const clsAttrs = (cls && cls.attrs) || {}
@@ -247,10 +250,11 @@ export function serializeCode(_state) {
     }
 
     // edges 数组：每条 { target, description, transform? }，target 序列化为目标 varName
+    // 悬空 target（指向已删实例）输出 null——写 varName 会产生 ReferenceError，整图无法加载
     const edges = inst.attrs.edges
     if (Array.isArray(edges) && edges.length > 0) {
       const items = edges.map(e => {
-        const tgtVar = (e && e.target && typeof e.target === 'object' && e.target.__instId)
+        const tgtVar = (e && e.target && typeof e.target === 'object' && e.target.__instId && liveAttrs.has(e.target))
           ? e.target.__instId.varName
           : 'null'
         const desc = (e && e.description != null) ? e.description : ''
