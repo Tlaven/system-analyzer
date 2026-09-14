@@ -6,7 +6,7 @@
 // panelMode 不入 sourceCode，存 state.panelMode[varName] 内存 map
 // Code 模式：panel 全只读，segmented control 禁用，加/删按钮不显示
 
-import { state, config } from './state.js'
+import { state, config, getPaletteColors } from './state.js'
 import { render } from './renderer.js'
 import { pushUndo, delInstance, delEdge } from './editor.js'
 import { save, syncCodeFromRuntime } from './io.js'
@@ -589,6 +589,8 @@ function _renderPropField({ propName, cont, inst, cls, codeMode, isType }) {
         writeVal(isNaN(v) ? 0 : v)
       }
     }
+    // A1:有历史时序的数值属性行内嵌 sparkline(stepAll 产点,runSource 清空)
+    if (!isType) _appendSparkline(row, inst.varName, propName)
   } else if (t === 'boolean') {
     row.innerHTML = '<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ifc)">' +
       '<input type="checkbox" id="np-attr-' + esc(propName) + '"' + (curVal ? ' checked' : '') + (codeMode ? ' disabled' : '') + '> ' +
@@ -610,6 +612,64 @@ function _renderPropField({ propName, cont, inst, cls, codeMode, isType }) {
   if (!codeMode) {
     const del = row.querySelector('.btn-del-prop')
     if (del) del.onclick = function() { deleteProperty(this.dataset.prop) }
+  }
+}
+
+// ============ A1 属性时序 mini sparkline(ADR-005) ============
+// 数据:state.traces[varName][attr] = {tick, value}[],环形缓冲 200,易失。
+// 写入 stepAll;runSource 清空。连播时 input.js 的 sa-tick 监听调 refreshSparklines 原地重绘(不重建 panel)。
+const SPARK_H = 26
+function _appendSparkline(row, varName, attr) {
+  const pts = (state.traces[varName] || {})[attr]
+  if (!pts || pts.length < 2) return
+  const cv = document.createElement('canvas')
+  cv.className = 'trace-spark'
+  cv.dataset.varName = varName
+  cv.dataset.attr = attr
+  cv.title = attr + ' · 最近 ' + pts.length + ' tick'
+  row.appendChild(cv)
+  _drawSparkline(cv, pts)
+}
+
+function _drawSparkline(cv, pts) {
+  const dpr = window.devicePixelRatio || 1
+  const w = cv.clientWidth || 200
+  const h = SPARK_H
+  cv.width = Math.round(w * dpr)
+  cv.height = Math.round(h * dpr)
+  const ctx = cv.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+  if (!pts || pts.length < 2) return
+  let min = Infinity, max = -Infinity
+  for (const p of pts) {
+    if (p.value < min) min = p.value
+    if (p.value > max) max = p.value
+  }
+  const span = (max - min) || Math.abs(max) || 1
+  const pad = 3
+  const x = i => pad + (w - pad * 2) * (i / (pts.length - 1))
+  const y = v => h - pad - (h - pad * 2) * ((v - min) / span)
+  const pc = getPaletteColors()
+  ctx.strokeStyle = pc.accent
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  pts.forEach((p, i) => { i ? ctx.lineTo(x(i), y(p.value)) : ctx.moveTo(x(i), y(p.value)) })
+  ctx.stroke()
+  const last = pts[pts.length - 1]
+  ctx.beginPath()
+  ctx.arc(x(pts.length - 1), y(last.value), 2.5, 0, Math.PI * 2)
+  ctx.fillStyle = pc.accent
+  ctx.fill()
+}
+
+// sa-tick 时原地重绘 panel 里所有 sparkline(保留 panel 滚动/focus 状态)
+export function refreshSparklines() {
+  const cvs = panelBody.querySelectorAll('canvas.trace-spark')
+  if (!cvs.length) return
+  for (const cv of cvs) {
+    const pts = (state.traces[cv.dataset.varName] || {})[cv.dataset.attr]
+    _drawSparkline(cv, pts)
   }
 }
 

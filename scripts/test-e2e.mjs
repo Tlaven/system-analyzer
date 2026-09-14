@@ -1020,6 +1020,116 @@ console.log('\n测试 35：importSource 守卫(version 校验 + editMode 尊重 
   }, V09_SAMPLE)
 }
 
+console.log('\n测试 36：A2 步进连播/暂停 + 速度三档')
+{
+  await page.evaluate(() => {
+    window.setExecMode('step')
+    window.setPlaySpeed('fast')
+  })
+  const ctl = await page.evaluate(() => ({
+    play: document.getElementById('play-btn').style.display !== 'none',
+    speed: document.getElementById('play-speed').style.display !== 'none',
+    speedVal: document.getElementById('play-speed').value,
+  }))
+  check('step 模式显示连播按钮', ctl.play === true, ctl)
+  check('step 模式显示速度选择（fast 选中）', ctl.speed === true && ctl.speedVal === 'fast', ctl)
+
+  await page.evaluate(() => window.togglePlay())
+  await new Promise(r => setTimeout(r, 550))
+  const t1 = await page.evaluate(() => ({
+    tick: window.state.tickCount,
+    playing: window.state.playing,
+    btn: document.getElementById('play-btn').textContent,
+  }))
+  check('连播推进 tick（≥2）', t1.tick >= 2, t1)
+  check('playing = true', t1.playing === true, t1)
+  check('按钮显示 暂停', t1.btn.includes('暂停'), t1.btn)
+
+  await page.evaluate(() => window.togglePlay())
+  const t2 = await page.evaluate(() => window.state.tickCount)
+  await new Promise(r => setTimeout(r, 400))
+  const t3 = await page.evaluate(() => ({
+    tick: window.state.tickCount,
+    playing: window.state.playing,
+    btn: document.getElementById('play-btn').textContent,
+  }))
+  check('暂停后 tick 不再推进', t3.tick === t2, { before: t2, after: t3.tick })
+  check('暂停后 playing = false + 按钮回连播', t3.playing === false && t3.btn.includes('连播'), t3)
+}
+
+console.log('\n测试 37：A1 属性时序记录 + panel sparkline')
+{
+  await page.evaluate(() => {
+    window.setExecMode('step')
+    window.resetRuntime()
+    window.stepOnce(); window.stepOnce(); window.stepOnce()
+  })
+  const tr = await page.evaluate(() => window.state.traces['Source_1'] && window.state.traces['Source_1'].rate)
+  check('Source_1.rate 记录 3 点', Array.isArray(tr) && tr.length === 3, tr)
+  check('tick 序号 1,2,3', !!tr && tr.map(p => p.tick).join(',') === '1,2,3', tr)
+
+  await page.evaluate(() => {
+    window.showNodePanel(window.state.runtimeInstances.find(i => i.varName === 'Source_1'))
+  })
+  const spark = await page.evaluate(() => {
+    const cvs = Array.from(document.querySelectorAll('#panel-body canvas.trace-spark'))
+    const rate = cvs.find(cv => cv.dataset.attr === 'rate')
+    return rate ? { w: rate.width, h: rate.height, count: cvs.length } : null
+  })
+  check('panel 出现 rate sparkline canvas', !!spark && spark.w > 0, spark)
+
+  // runSource 清空:sparkline 数据不留到下一局
+  await page.evaluate(() => window.resetRuntime())
+  const cleared = await page.evaluate(() => Object.keys(window.state.traces).length)
+  check('resetRuntime 后 traces 清空', cleared === 0, cleared)
+}
+
+console.log('\n测试 38：换图（runSource）自动停连播')
+{
+  await page.evaluate(() => {
+    window.setExecMode('step')
+    window.setPlaySpeed('fast')
+    window.togglePlay()
+  })
+  const playingBefore = await page.evaluate(() => window.state.playing)
+  check('连播已启动', playingBefore === true, playingBefore)
+
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: '换图' })
+  }, V09_SAMPLE)
+  await new Promise(r => setTimeout(r, 400))
+  const after = await page.evaluate(() => ({
+    playing: window.state.playing,
+    btn: document.getElementById('play-btn').textContent,
+  }))
+  check('换图后 playing = false', after.playing === false, after)
+  check('换图后按钮回 连播', after.btn.includes('连播'), after.btn)
+}
+
+console.log('\n测试 39：A3 环成员识别 + 环边渲染不崩')
+{
+  const CYCLE_SAMPLE = `class A { attrs = { v: 0 } }
+class B { attrs = { v: 0 } }
+class C { attrs = { v: 0 } }
+
+const A_1 = GraphStarter.add(A)
+const B_1 = GraphStarter.add(B)
+const C_1 = GraphStarter.add(C)
+A_1.edges = [{ target: B_1 }]
+B_1.edges = [{ target: A_1 }, { target: C_1 }]`
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: '环测试' })
+  }, CYCLE_SAMPLE)
+  const r = await page.evaluate(() => ({
+    members: window.__sa_test.cycleMembers().sort(),
+    topoErrors: window.state.runtimeInstances.filter(i => i._topoError).map(i => i.varName).sort(),
+    edges: window.deriveEdges().length,
+  }))
+  check('环成员 = A_1,B_1（不含下游 C_1）', r.members.join(',') === 'A_1,B_1', r.members)
+  check('下游 C_1 仍标 _topoError（执行跳过语义）', r.topoErrors.join(',') === 'A_1,B_1,C_1', r.topoErrors)
+  check('3 条边派生 + 渲染无异常', r.edges === 3, r.edges)
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

@@ -8,7 +8,7 @@
 ```
 支柱一(已立):  结构可视化   —— 画布三档 + 路由/布局/端口(渲染/路由/布局三层文档)
 支柱一(已立):  语义可执行   —— sourceCode 即文档 + transform 轻量响应式(ADR-003)
-支柱二(方向已定, MVP 未做): 执行观测 —— 时序记录 + 步进播放 + 环路标记(ADR-005)
+支柱二(已立):  执行观测     —— 属性时序(panel sparkline) + 步进连播 + 环边标记(ADR-005 MVP)
 正在酝酿:      运行时事实   —— 双层边(探测边), 与支柱二同哲学的两个入口之一
 ```
 
@@ -17,25 +17,7 @@
 
 ---
 
-## A. 执行观测 MVP(ADR-005 三分件,planned)
-
-### A1. 属性时序记录 — planned
-
-- `state.traces`: 每 `varName.attr` → `{tick, value}[]`,环形缓冲上限 200
-- 写入点:`stepAll()` 每 tick 结束(引擎已留 tickCount/execHistory 骨架)
-- 显示:panel 属性行内嵌 mini sparkline(易失,reset 清空)
-- **语义澄清**:propagate 是"同一时刻的因果重算"(不动时钟,不产生时间点);stepAll 才推进时间。trace 只记 stepAll。
-
-### A2. 步进播放控制 — planned
-
-- 执行模式 `step` 扩为三态:单步(现有)/ 连播(Play, 可暂停)/ 速度三档(慢/中/快)
-- 连播 = `setInterval(stepAll, dt)`,画面同步;暂停即停,不复历史
-
-### A3. 环路视觉标记 — planned
-
-- 数据现成:topologicalSort 已标 `_topoError`(环内+下游成员)
-- MVP:环成员间相互连接的边在画布上高亮(虚线 red);仅把"⚠ 错误文字"升级为"环路径可见"
-- 显示通道计划(visualization-modes.md §10)的新增项属于同一批,一起排期
+## A. 执行观测(ADR-005 MVP 已完成,移出;历史在 git)
 
 ### 远期(本支柱,暂不排期)
 
@@ -60,7 +42,7 @@
 
 5 新通道(transform 活性/方法体圆点/边 description/override 标记/执行脉冲)+ 2 假 affordance 清除。
 
-注意 **与 A 的排序耦合**:通道 5"执行脉冲"应当在 A2(步进播放)之后做,否则脉冲没有触发者。
+注意**与 A 的耦合已解除**:通道 5"执行脉冲"的触发者(A2 连播)已就绪,可随批做;通道 1(transform 活性标记)与已于本轮实现的 A3 环边标记同区(边装饰),排期时放一起评估。
 
 ---
 
@@ -72,6 +54,6 @@
 
 ## 原则约束(贯穿以上所有方向,违反需新 ADR)
 
-1. **演化层原则**:所有观测/探测数据(traces、探测边、execHistory)不入 sourceCode、不入 URL hash——它们是运行时事实,不是作者意图
+1. **演化层原则**:所有观测/探测数据(traces、探测边)不入 sourceCode、不入 URL hash——它们是运行时事实,不是作者意图
 2. **防溢出原则**:观测 UI 优先住 panel/tooltip;画布新增显示仅限"三档均适用的小角标"(见 visualization-modes.md §10 表)
 3. **零转换原则保留**:观测不得引入"编辑态→运行态"的 deploy 步骤——观测的对象就是眼前对象(文档=程序哲学的一部分)

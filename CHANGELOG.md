@@ -4,8 +4,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- **执行观测 MVP(ADR-005,roadmap A1–A3)**:
+  - **A1 属性时序记录**——`state.traces[varName][attr] = {tick, value}[]`,环形缓冲 200,`stepAll` 每 tick 写入(只记数值型 own attrs);panel 数值属性行内嵌 mini sparkline,连播时原地重绘不重建 panel
+  - **A2 步进连播**——执行模式 `step` 下新增 `▶ 连播/⏸ 暂停` + 速度三档(慢 1s / 中 0.5s / 快 0.15s,`config.playSpeed` 持久化),`setInterval(stepAll)` 驱动;换图(`runtimeGen` 变)/切模式自动停
+  - **A3 环边标记**——Tarjan SCC 识别真环成员(与 Kahn 剩余"环内+下游"区分),两端均为环成员的边在画布红色虚线覆盖(直/曲/折线同路径)
+- `scripts/test-engine.mjs`——引擎 Node 单测 17 项(traces 写入/环形缓冲 200/runSource 清空/环成员识别:环、无环、自环)
+- e2e 测试 36–39:连播/暂停/换图停播/时序记录 + sparkline/环成员识别
+
 ### Changed
 
+- **state.js `CanvasRenderingContext2D` polyfill 加 `typeof` guard**——engine.js 现可在 Node 直接 import(兑现 v0.13 "引擎 pure 化可 Node 测试"的承诺,此前 state.js 顶层 polyfill 会抛 `CanvasRenderingContext2D is not defined`)
+- `runSource` 现在清空演化层(`state.traces` / `tickCount`)并递增 `state.runtimeGen`(连播守卫:换图即停);演化数据仍不入 sourceCode/URL(ADR-005)
+- renderer.js 抽取 `drawEdgePath()` helper——主路径 / 环边标记 / dashFlow 动画三处共用,消除路径绘制重复
 - **engine.js 剥离 DOM/render,引擎层 pure 化**——`runTransforms` / `propagate` 不再内部调 `render()`,调用方(panel `triggerPropagate` / `_onTransformInput` / input `window.runPropagate`)补 render;`stepAll` 去掉直接读改 `#step-btn` DOM 的逻辑,改 `dispatchEvent('sa-tick')`,input.js 监听后更新按钮文本 + render。engine.js 不再 import renderer.js,理论上可被 Node 单元测试加载
 - **`deriveEdges` 从 io.js 迁入 codegraph.js + 加 lazy 缓存**——14 处调用方从 `deriveEdges()`(每次重算 O(n+m))改为 `deriveEdges(state)`(dirty flag + lazy 求值)。`runSource` 末尾自动失效;7 处写边入口(`editor.delInstance` / `panel.{setEdgeTarget,setEdgeDescription,delCurrentEdge,addInstanceEdge,removeInstanceEdge}` / `input.createEdgeFromDrag`)调 `invalidateEdges()`。副产物:砍掉 io↔{engine,physics,renderer,utils} 四条循环依赖 + utils.js → io.js 反向依赖。e2e 钩子 `window.invalidateEdges` 暴露
 - 抽取 panel.js 私有 `markUndo()`,消除 8 处 `if (!state.panelUndoPushed) { pushUndo(); ... }` 雷同代码
@@ -16,10 +28,8 @@
 
 ### Removed
 
+- `state.execHistory` 及 `stepAll` 写入——0 消费者且无上限(连播上线后会变成无界增长),观测数据由 `state.traces` 统一承载(统一模型优先)
 - **wrapInstance 3 个 0-调用方 getter**:`inst.inputs` / `inst.outputs`(v0.8 端口概念残留,永远返回 `[]`)/ `inst.computed`(0 调用方,`define-demo.mjs` 的 `.computed` 是它自己 model shape 不是 inst)。同步解开 `renderer.js:352` 死代码 `12 * (n.outputs.length + 1)` → `12`(outputs 永远 [] → 该表达永为 12)
-
-### Removed
-
 - `engine.js` 对 `renderer.js` 的 import + 内部 3 处 `render()` 直调 + `step-btn` DOM 读写
 - `io.js deriveEdges` 函数(已迁入 codegraph.js)
 - `editor.js selectNode` 兼容别名(0 调用方,`delNode` 仍被 panel.js HTML onclick 用而保留)

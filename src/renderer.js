@@ -1,6 +1,7 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, NODE_RADIUS, PORT_R, ARROW_SZ, getPaletteColors } from './state.js'
 import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, formatScalar } from './utils.js'
 import { deriveEdges, nodeIndex } from './codegraph.js'
+import { getCycleMembers } from './engine.js'
 
 export function drawGrid() {
   const pc = getPaletteColors()
@@ -114,6 +115,7 @@ export function render() {
   // 多边同对的并行由端口分配处理（edgePts → getPortPos → computeNodePorts）
   const _allEdges = deriveEdges(state)
   const _byId = nodeIndex(state)
+  const _cycleMembers = getCycleMembers()
 
   for (const e of _allEdges) {
     const s = _byId.get(e.source_node), t = _byId.get(e.target_node)
@@ -124,6 +126,8 @@ export function render() {
     const es2 = config.edgeStyle
     const isCurve = es2 === 'curve'
     const isHighlighted = isDimmed() && hoverConnectedEdgeIds.has(e.id)
+    // ADR-005 A3:环上边(两端都是真环成员)红色虚线覆盖标记
+    const isCycleEdge = _cycleMembers.has(e.source_instance) && _cycleMembers.has(e.target_instance)
     const ec = isSel ? es.sel : (isHovered ? es.sel : es.color)
     ctx.strokeStyle = ec
     ctx.lineWidth = isSel ? 2.5 : (isHovered || isHighlighted) ? 3.0 : 1.8
@@ -183,19 +187,29 @@ export function render() {
       }
     }
 
-    if (route) {
-      ctx.beginPath(); ctx.moveTo(route[0].x, route[0].y)
-      for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y)
-      ctx.stroke()
-    } else if (isCurve && curveCubic) {
-      // 单段 cubic：P1 → cp1 → cp2 → P2
+    const drawEdgePath = () => {
       ctx.beginPath()
-      ctx.moveTo(P1.x, P1.y)
-      ctx.bezierCurveTo(curveCubic.cp1.x, curveCubic.cp1.y, curveCubic.cp2.x, curveCubic.cp2.y, P2.x, P2.y)
-      ctx.stroke()
-    } else {
-      // straight 或 curve 降级（3+ 节点遮挡，强行绕只会更乱）
-      ctx.beginPath(); ctx.moveTo(P1.x, P1.y); ctx.lineTo(P2.x, P2.y); ctx.stroke()
+      if (route) {
+        ctx.moveTo(route[0].x, route[0].y)
+        for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y)
+      } else if (isCurve && curveCubic) {
+        // 单段 cubic：P1 → cp1 → cp2 → P2
+        ctx.moveTo(P1.x, P1.y)
+        ctx.bezierCurveTo(curveCubic.cp1.x, curveCubic.cp1.y, curveCubic.cp2.x, curveCubic.cp2.y, P2.x, P2.y)
+      } else {
+        // straight 或 curve 降级（3+ 节点遮挡，强行绕只会更乱）
+        ctx.moveTo(P1.x, P1.y); ctx.lineTo(P2.x, P2.y)
+      }
+    }
+    drawEdgePath(); ctx.stroke()
+
+    if (isCycleEdge) {
+      ctx.save()
+      ctx.strokeStyle = '#e53935'
+      ctx.lineWidth = 2
+      ctx.setLineDash([6, 4])
+      drawEdgePath(); ctx.stroke()
+      ctx.restore()
     }
 
     // 箭头方向：polyline 用 route 末段切线；curve 用 cp2→P2 切线；straight 用基线方向
@@ -209,16 +223,7 @@ export function render() {
       ctx.save()
       if (config.edgeAnim === 'dashFlow') {
         ctx.setLineDash([8, 6]); ctx.lineDashOffset = -state.physTime * 0.8
-        ctx.beginPath()
-        if (route) {
-          ctx.moveTo(route[0].x, route[0].y)
-          for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y)
-        } else if (isCurve && curveCubic) {
-          ctx.moveTo(P1.x, P1.y)
-          ctx.bezierCurveTo(curveCubic.cp1.x, curveCubic.cp1.y, curveCubic.cp2.x, curveCubic.cp2.y, P2.x, P2.y)
-        } else {
-          ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y)
-        }
+        drawEdgePath()
         ctx.lineWidth = 1.8; ctx.stroke()
       } else {
         // particleFlow:沿路径参数 t 取点

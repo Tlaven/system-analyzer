@@ -1,5 +1,5 @@
-// Polyfill
-if (!CanvasRenderingContext2D.prototype.roundRect) {
+// Polyfill(Node 环境无 CanvasRenderingContext2D:引擎单元测试需要 import 本文件)
+if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect) {
   CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
     if (r > w / 2) r = w / 2
     if (r > h / 2) r = h / 2
@@ -117,6 +117,7 @@ export const config = {
   infoLevel: 'minimal', positionMode: 'manual', edgeAnim: 'none',
   brightness: 0, palette: 'classic',
   execMode: 'off',
+  playSpeed: 'normal',  // A2 连播速度:'slow' | 'normal' | 'fast'
   layoutDirection: 'TB',  // v0.10: 'LR' (层在 x 轴) | 'TB' (层在 y 轴)，hierarchical 布局 + 端口方向共用
 }
 
@@ -176,7 +177,10 @@ export const state = {
   animFrame: null, physTime: 0, dragHeat: 0,
 
   // 执行
-  tickCount: 0, execHistory: [],
+  tickCount: 0,
+  traces: {},        // 演化层(ADR-005 A1):varName -> { [attr]: {tick, value}[] },环形缓冲 200,易失不入 sourceCode
+  playing: false,    // A2 连播中(易失 UI 状态)
+  runtimeGen: 0,     // runSource 重建计数(连播守卫:换图即停,见 input.js)
 
   // 输入
   spaceHeld: false, panState: null,

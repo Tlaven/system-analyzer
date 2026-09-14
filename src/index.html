@@ -112,6 +112,8 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
 .panel-mode-toggle .edit-mode-btn{flex:1;text-align:center}
 .panel-warn{padding:6px 10px;margin:6px 0 10px;background:#fff8e1;border:1px solid #ffcc80;border-radius:5px;color:#bf360c;font-size:12px;line-height:1.5}
 .dark .panel-warn{background:#3a2a1a;border-color:#6d4c41;color:#ff8a65}
+/* A1 属性时序 mini sparkline(ADR-005) */
+.trace-spark{display:block;width:100%;height:26px;margin-top:4px}
 </style>
 </head>
 <body>
@@ -176,6 +178,10 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
   <div class="sep"></div>
   <span id="zoom-display" onclick="resetZoom()" style="cursor:pointer;font-size:12px;color:var(--ttext);min-width:40px;text-align:center" title="点击重置为 100%">100%</span>
   <button id="step-btn" onclick="stepOnce()" style="display:none;padding:4px 10px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;color:var(--tbtnc)">▶ 下一步</button>
+  <button id="play-btn" onclick="togglePlay()" style="display:none;padding:4px 10px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;color:var(--tbtnc)">▶ 连播</button>
+  <select id="play-speed" onchange="setPlaySpeed(this.value)" title="连播速度" style="display:none;padding:3px 6px;border:1px solid var(--tbtnb);background:var(--tbtn);border-radius:4px;font-size:12px;font-family:inherit;color:var(--tbtnc)">
+    <option value="slow">慢</option><option value="normal">中</option><option value="fast">快</option>
+  </select>
   <div class="sep"></div>
   <div class="edit-mode-group" title="切换编辑模式（UI 编辑 ↔ 代码）">
     <button class="edit-mode-btn active" data-mode="ui" onclick="setEditMode('ui')">UI 编辑</button>

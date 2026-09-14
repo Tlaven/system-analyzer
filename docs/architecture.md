@@ -11,11 +11,11 @@
 | 模块 | 文件 | 定位 |
 |---|---|---|
 | **入口/编排** | `src/main.js` | init 顺序:URL hash > localStorage > DEFAULT_BOOTSTRAP;装配 state/panel/codeview/renderer |
-| **状态** | `src/state.js` | runtimeInstances / sourceCode / visualState / panelMode 等运行时状态(单例) |
+| **状态** | `src/state.js` | runtimeInstances / sourceCode / visualState / panelMode / traces(演化层,ADR-005) 等运行时状态(单例) |
 | **代码层(真相源)** | `src/codegraph.js` | `runSource` 执行 sourceCode、`serializeCode` 反向构建、`makeBridge` 提供 `GraphStarter.add`、`deriveEdges(state)` + lazy 缓存派生边视图(v0.13 从 io.js 迁入) |
 | **scanner** | `src/scanner.js` | 静态分析 sourceCode 字符串,提取 class 定义(读 `new cls()` 实例的 3 个 class field) |
 | **运行时层** | `src/io.js` | `wrapInstance` 加 getter、state 别名 |
-| **执行引擎** | `src/engine.js` | `topologicalSort` / `propagate` / `stepAll`(方法体调度,Code 模式方法体才生效)+ `evalTransforms` / `runTransforms`(边级 transform 表达式,ADR-003,跨模式生效)。v0.13 pure 化:无 DOM/render 依赖,`stepAll` 通过 `dispatchEvent('sa-tick')` 通知 UI |
+| **执行引擎** | `src/engine.js` | `topologicalSort` / `propagate` / `stepAll`(方法体调度,Code 模式方法体才生效)+ `evalTransforms` / `runTransforms`(边级 transform 表达式,ADR-003,跨模式生效)+ `getCycleMembers`(Tarjan SCC,ADR-005 A3)。v0.13 pure 化:无 DOM/render 依赖,`stepAll` 通过 `dispatchEvent('sa-tick')` 通知 UI;`stepAll` 末尾写 `state.traces`(A1)。**可 Node 单测**(`scripts/test-engine.mjs`) |
 | **持久化** | `src/main.js` 内 `load`/`save` | `sa_data` 存 `{version, sourceCode, visualState, ...}`,URL hash 分享 base64 |
 | **渲染** | `src/renderer.js` | Canvas 2D,按 `infoLevel` 三档渲染节点 + 边布线 |
 | **路由** | `src/utils.js` (`edgePts` 等) | 边端点 + 控制点几何计算 |
@@ -216,6 +216,8 @@ Code 模式交互:
 
 **执行引擎** (`src/engine.js`). 三层入口:(1) `topologicalSort()` 基于 `deriveEdges()` 排序实例;(2) `propagate(startVarName)` / `stepAll()` 按拓扑序调用方法体(UI 模式 class 无方法体 → 方法调用是 no-op,等 Code 模式 AI 实现方法体后才有效果);(3) `evalTransforms()` / `runTransforms()` 跑边级 transform 表达式(ADR-003,**跨模式生效**——transform 是 attrs 模型的一部分,不是方法体)。`evalTransforms` 不走 topo 序也不跳过环:声明式公式各跑一次不会无限循环,按 `runtimeInstances` 定义顺序跑(source 通常先于 target)。`propagate()` 内部末尾也调一次 `evalTransforms()`,所以 auto 模式重算方法体后会顺带跑 transform。
 
+**执行观测(ADR-005 MVP)**. `stepAll()` 每 tick 末尾把数值型 own attrs 写入 `state.traces`(环形缓冲 200),panel 数值属性行渲染 mini sparkline,连播时 input.js 的 `sa-tick` 监听原地重绘。连播控件(▶/⏸ + 速度三档)在 `input.js`:`setInterval(stepAll)` 驱动,`state.runtimeGen`(runSource 递增)守卫换图即停。环边标记:`getCycleMembers()` 用 Tarjan SCC 区分真环成员与 Kahn 剩余的下游节点,renderer 对两端均为环成员的边叠加红色虚线。propagate 是"同一时刻的因果重算"(不动时钟),trace 的 tick 只由 stepAll 推进。
+
 **持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。**载入失败保护**:`load()` 反序列化成功但 `runSource` 失败时置 `state.loadError`,`save()` 拒绝覆盖 `sa_data`(防止空画布的下一次编辑抹掉用户图);`loadError` 由成功操作清除(onNew / importSource / codeview commitCode 成功)。**载入守卫**:importSource 校验 version(≠6 拒绝)、尊重数据里的 editMode、UI 模式 + 程序化 sourceCode 时 confirm 推荐切 Code 模式载入。
 
 **旧格式硬切换。** v0.9 之前的 `sa_data`(version !== 6,含 v0.5 / v0.6 / v0.7 / v0.8)与 v0.9 不兼容(实例级 edges 模型与历史 class.edges + null 槽风格不兼容)。`load()` 检测到旧版本会丢弃并清空 `sa_data`,返回 false → 走 DEFAULT_BOOTSTRAP(空)。
@@ -289,3 +291,8 @@ v0.6/v0.8 时代的"命名端口"被 v0.9 砍掉——边是实例级数组,端�
 19. **class 定义写在 sourceCode 字符串里**(启动时 `new Function` 执行),不在 bundle 中作为 module import。
 20. **Class method bodies forbid `fetch` / `XMLHttpRequest` / `import` / `require`**(文档约定,无运行时强制)。仅在 Code 模式存在;UI 模式 serializeCode 永不输出方法体。
 21. **UI labels are in Chinese; identifiers 分层支持 Unicode(详见 ADR-004)**——序列化/Code 模式全支持 Unicode;仅 UI 新建 modal 输入校验保持 ASCII;`isValidIdentifier` 两份实现(utils ASCII / codegraph Unicode),不允许第三个。
+
+### 执行观测不变量(ADR-005 MVP)
+
+22. **traces 只在 `stepAll` 写入,`runSource` 清空**。propagate 是"同一时刻的因果重算"(不动时钟,不产生时间点);tick 只由 stepAll 推进。`state.runtimeGen` 每次 `runSource` 递增,连播(`input.js`)据此换图即停。
+23. **环成员识别是渲染层数据,不参与执行跳过**。`getCycleMembers()`(Tarjan SCC)只标真环成员;`_topoError`(Kahn 剩余 = 环内 + 下游)保持"执行跳过"原语义,二者不合并。

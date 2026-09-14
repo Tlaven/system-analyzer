@@ -16,6 +16,75 @@ import { state } from './state.js'
 import { deriveEdges } from './codegraph.js'
 
 const EXEC_TIMEOUT_MS = 100
+const TRACE_CAP = 200  // A1:每 varName.attr 环形缓冲上限(roadmap)
+
+// ============ A1 属性时序记录(ADR-005) ============
+// 写入点:stepAll 每 tick 结束。只记数值型 own attrs(非 number/非有限值跳过,
+// edges/`__` 前缀跳过)。易失:runSource 清空(codegraph.js),不入 sourceCode/URL。
+function recordTraces() {
+  for (const inst of state.runtimeInstances) {
+    for (const key of Object.keys(inst.attrs)) {
+      if (key.startsWith('__') || key === 'edges') continue
+      const v = inst.attrs[key]
+      if (typeof v !== 'number' || !isFinite(v)) continue
+      let byAttr = state.traces[inst.varName]
+      if (!byAttr) byAttr = state.traces[inst.varName] = {}
+      let arr = byAttr[key]
+      if (!arr) arr = byAttr[key] = []
+      arr.push({ tick: state.tickCount, value: v })
+      if (arr.length > TRACE_CAP) arr.shift()
+    }
+  }
+}
+
+// ============ A3 环成员识别(Tarjan SCC) ============
+// topologicalSort 的 _topoError 标"环内 + 下游"(Kahn 剩余),无法区分真环成员。
+// 这里对全图跑 SCC:size>1 的分量或自环 = 真环成员。仅供渲染层标记,不参与执行跳过。
+// 惰性:跟随 topologicalSort 缓存(topologicalSort 缓存未命中时重算)。
+let _cycleMembers = new Set()
+
+function computeCycleMembers() {
+  const adj = new Map()
+  for (const i of state.runtimeInstances) adj.set(i.varName, [])
+  for (const e of deriveEdges(state)) {
+    const a = adj.get(e.source_instance)
+    if (a && adj.has(e.target_instance)) a.push(e.target_instance)
+  }
+  const index = new Map(), low = new Map(), onStack = new Set(), stack = []
+  const members = new Set()
+  let counter = 0
+  function strongconnect(v) {
+    index.set(v, counter); low.set(v, counter); counter++
+    stack.push(v); onStack.add(v)
+    const nbrs = adj.get(v) || []
+    for (const w of nbrs) {
+      if (!index.has(w)) {
+        strongconnect(w)
+        if (low.get(w) < low.get(v)) low.set(v, low.get(w))
+      } else if (onStack.has(w)) {
+        if (index.get(w) < low.get(v)) low.set(v, index.get(w))
+      }
+    }
+    if (low.get(v) === index.get(v)) {
+      const comp = []
+      let w
+      do { w = stack.pop(); onStack.delete(w); comp.push(w) } while (w !== v)
+      if (comp.length > 1 || nbrs.includes(v)) {
+        for (const n of comp) members.add(n)
+      }
+    }
+  }
+  for (const i of state.runtimeInstances) {
+    if (!index.has(i.varName)) strongconnect(i.varName)
+  }
+  return members
+}
+
+// 渲染层入口:边两端都在集合内 = 环上连接(MVP 口径,见 roadmap A3)。
+export function getCycleMembers() {
+  topologicalSort()
+  return _cycleMembers
+}
 
 // ============ Topological sort (Kahn) with cache ============
 let _topoCache = null, _topoKey = ''
@@ -54,6 +123,7 @@ export function topologicalSort() {
     i._topoError = !order.includes(i.varName) ? '循环依赖' : null
   }
 
+  _cycleMembers = computeCycleMembers()
   _topoCache = order
   return order
 }
@@ -152,11 +222,14 @@ export function stepAll() {
   }
 
   state.tickCount++
-  state.execHistory.push({
-    tick: state.tickCount,
-    instances: state.runtimeInstances.map(i => ({ id: i.varName, error: i._execError || null })),
-  })
+  recordTraces()
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('sa-tick', { detail: { tickCount: state.tickCount } }))
   }
+}
+
+// 测试钩子(e2e 查环成员数据)
+if (typeof window !== 'undefined') {
+  window.__sa_test = window.__sa_test || {}
+  window.__sa_test.cycleMembers = () => Array.from(getCycleMembers())
 }

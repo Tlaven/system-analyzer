@@ -15,6 +15,7 @@
 - **节点 + 边 + 属性** 的可视化编辑
 - **UI / Code 双模式编辑** — 拖一拖就改图,或写方法体表达任意算法(详见 [ADR-002](docs/decisions/adr-002-dual-mode-editing.md))
 - **边级 transform 表达式** — 边上写 JS 语句片段,改上游 attr 自动重算下游,像 Excel formula(详见 [ADR-003](docs/decisions/adr-003-edge-transform-expressions.md))
+- **执行观测** — 步进 / 连播推进 tick,数值属性历史记入 panel sparkline,环边红色虚线标记(详见 [ADR-005](docs/decisions/adr-005-execution-observation.md))
 - **Canvas 渲染** — 三档信息密度 / 多种布线 / 多种布局
 - **中文/Unicode 全栈支持** — class name、attr key、varName 都可以是中文
 - **AI 自发现** — 通过 `/llms.txt` 入口契约被 AI 跨对话/跨项目复用,无需 manual 引导
@@ -32,11 +33,12 @@ npm run build      # bundle src/main.js → dist/index.html (single file)
 
 ```bash
 node scripts/test-codegraph.mjs    # 核心引擎单元测试(runSource/serializeCode/resetRuntime)
+node scripts/test-engine.mjs       # 执行观测单元测试(traces/环成员识别,无浏览器)
 node scripts/test-roundtrip.mjs    # scanner 静态分析单元测试(无浏览器)
 node scripts/test-e2e.mjs          # puppeteer e2e(loads dist/index.html — MUST build first)
 ```
 
-无 test runner / lint / typecheck。验证靠上面三个 `.mjs` 脚本 + 浏览器手动验证。
+无 test runner / lint / typecheck。验证靠上面四个 `.mjs` 脚本 + 浏览器手动验证。
 
 ## 怎么用
 

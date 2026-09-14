@@ -7,7 +7,7 @@ import { importJSON, save, onExport, onNew, shareURL, resetRuntime, syncCodeFrom
 import { deriveEdges, invalidateEdges } from './codegraph.js'
 import { toggleCodeView, commitCodeNow, setCodeViewReadOnly } from './codeview.js'
 import { loadConfig, saveConfig, applyTheme } from './config.js'
-import { showNodePanel, showEdgePanel } from './panel.js'
+import { showNodePanel, showEdgePanel, refreshSparklines } from './panel.js'
 import { showModal } from './modal.js'
 import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName } from './utils.js'
 import { stepAll, propagate, runTransforms } from './engine.js'
@@ -50,10 +50,54 @@ window.commitCodeNow = commitCodeNow
 window.stepOnce = stepAll
 window.stepAll = stepAll
 window.runTransforms = runTransforms
+
+// ============ A2 步进连播(Play/暂停 + 速度三档) ============
+// 生命周期:控件显示由 execMode==='step' 控制;换图(runtimeGen 变)/切模式即停。
+// 连播 = setInterval(stepAll, dt),启动先走一步保证点击有反馈;暂停即停,不复历史。
+let _playTimer = null
+function playSpeedMs() {
+  return config.playSpeed === 'slow' ? 1000 : config.playSpeed === 'fast' ? 150 : 500
+}
+function stopPlay() {
+  if (_playTimer) { clearInterval(_playTimer); _playTimer = null }
+  state.playing = false
+  const btn = document.getElementById('play-btn')
+  if (btn) btn.textContent = '▶ 连播'
+}
+function startPlay() {
+  stopPlay()
+  const gen = state.runtimeGen
+  state.playing = true
+  const btn = document.getElementById('play-btn')
+  if (btn) btn.textContent = '⏸ 暂停'
+  stepAll()
+  _playTimer = setInterval(() => {
+    // 换图/重跑源码(gen 变)= 停,不在新图上继续跑旧连播
+    if (state.runtimeGen !== gen) { stopPlay(); return }
+    stepAll()
+  }, playSpeedMs())
+}
+window.togglePlay = () => { state.playing ? stopPlay() : startPlay() }
+window.stopPlay = stopPlay
+window.setPlaySpeed = function(val) {
+  config.playSpeed = (val === 'slow' || val === 'fast') ? val : 'normal'
+  saveConfig()
+  const sel = document.getElementById('play-speed')
+  if (sel) sel.value = config.playSpeed
+  if (state.playing) startPlay()  // 重启 interval 用新 dt
+}
 window.setExecMode = function(val) {
+  if (val !== 'step') stopPlay()
   config.execMode = val; saveConfig()
   const stepBtn = document.getElementById('step-btn')
   if (stepBtn) stepBtn.style.display = val === 'step' ? '' : 'none'
+  const playBtn = document.getElementById('play-btn')
+  if (playBtn) playBtn.style.display = val === 'step' ? '' : 'none'
+  const speedSel = document.getElementById('play-speed')
+  if (speedSel) {
+    speedSel.style.display = val === 'step' ? '' : 'none'
+    speedSel.value = config.playSpeed || 'normal'
+  }
   if (val === 'auto') { state.tickCount = 0 }
   const pr = document.getElementById('propagate-row')
   if (pr) pr.style.display = val === 'manual' ? 'flex' : 'none'
@@ -467,10 +511,11 @@ Object.defineProperty(window, 'selEdge', {
 export function initInput() {
   const canvas = document.getElementById('canvas')
 
-  // v0.13: 监听引擎 sa-tick 事件,更新 step-btn 文本 + 重绘(engine.js 不再直读 DOM)
+  // v0.13: 监听引擎 sa-tick 事件,更新 step-btn 文本 + A1 sparkline 原地重绘 + 重绘
   window.addEventListener('sa-tick', (e) => {
     const stepBtn = document.getElementById('step-btn')
     if (stepBtn) stepBtn.textContent = '▶ 下一步 (#' + e.detail.tickCount + ')'
+    refreshSparklines()
     render()
   })
 
@@ -775,7 +820,14 @@ export function initInput() {
   document.getElementById('sel-pos').value = config.positionMode
   document.getElementById('sel-anim').value = config.edgeAnim
   document.getElementById('sel-exec').value = config.execMode || 'off'
-  if (config.execMode === 'step') document.getElementById('step-btn').style.display = ''
+  const playSpeedSel = document.getElementById('play-speed')
+  if (playSpeedSel) playSpeedSel.value = config.playSpeed || 'normal'
+  if (config.execMode === 'step') {
+    document.getElementById('step-btn').style.display = ''
+    if (playSpeedSel) playSpeedSel.style.display = ''
+    const pb = document.getElementById('play-btn')
+    if (pb) pb.style.display = ''
+  }
 
   // v0.7: 同步 segmented control 视觉态（reload 后 state.editMode 可能是 'code'）
   updateEditModeUI()

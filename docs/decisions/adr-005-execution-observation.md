@@ -2,7 +2,7 @@
 
 ## 状态
 
-accepted(方向与分界已定;MVP 实现为未完成事项,见 docs/roadmap.md)
+accepted(方向与分界已定;MVP 已实现——traces/连播/环边标记,见 CHANGELOG [Unreleased];远期 what-if/影响解析仍暂不排期)
 
 ## 背景
 

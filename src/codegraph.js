@@ -151,6 +151,11 @@ function makeBridge() {
 export function runSource(sourceCode, state) {
   state.runtimeInstances.length = 0
   state.classes = {}
+  // 演化层清空(ADR-005):重跑源码 = 新一局,旧 trace/时钟不跨局。
+  // runtimeGen 供连播守卫用(换图即停,见 input.js startPlay)。
+  state.traces = {}
+  state.tickCount = 0
+  state.runtimeGen = (state.runtimeGen || 0) + 1
 
   const { classes, bootstrap } = splitSource(sourceCode)
 
