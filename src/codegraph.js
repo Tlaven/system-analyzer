@@ -15,6 +15,7 @@
 import { splitSource } from './parser.js'
 import { scanClass } from './scanner.js'
 import { getInstanceAttrKeys } from './attrkeys.js'
+import { invalidateProbes } from './probe.js'
 
 // ============ 派生边视图 + lazy 缓存 ============
 //
@@ -34,6 +35,7 @@ let _nodeIdxCache = null
 export function invalidateEdges() {
   _edgesDirty = true
   _nodeIdxCache = null
+  invalidateProbes()  // 结构变更 = 探测边(引用派生)的一部分失效源,一并清(略过度失效,代价为一次 lazy 重算)
 }
 
 // varName -> inst 查找索引,与 deriveEdges 共用失效点(实例集合只在 runSource/删改时变)
@@ -323,13 +325,37 @@ function quoteKey(k) {
   return "'" + k.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"
 }
 
+// 值 → JS 字面量。B-L1 起支持"实例引用保持身份":
+//   - 直接引用(attrs 带 __instId)→ 输出目标 varName
+//   - 嵌套容器(array/plain object)里任意深度的引用同样输出 varName
+// 环/超深(>8)降级 null,保证序列化不炸;非 plain object(Date 等)走 JSON.stringify 旧行为。
+// 不做这一步的话:panel 一编辑 → syncCodeFromRuntime → 引用被 JSON 化成副本 → 重载后探测边消失。
 export function formatValue(v) {
+  return _formatValue(v, 0, new Set())
+}
+
+function _formatValue(v, depth, seen) {
   if (typeof v === 'string') {
     const escaped = v.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')
     return "'" + escaped + "'"
   }
   if (v === null) return 'null'
   if (v === undefined) return 'undefined'
-  if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
+  if (typeof v !== 'object') return String(v)
+  if (v.__instId && typeof v.__instId.varName === 'string') return v.__instId.varName
+  const proto = Object.getPrototypeOf(v)
+  if (!Array.isArray(v) && proto !== Object.prototype && proto !== null) return JSON.stringify(v)
+  if (depth >= 8 || seen.has(v)) return 'null'
+  seen.add(v)
+  let out
+  if (Array.isArray(v)) {
+    out = '[' + v.map(x => _formatValue(x, depth + 1, seen)).join(', ') + ']'
+  } else {
+    const entries = Object.keys(v)
+      .filter(k => !k.startsWith('__'))
+      .map(k => (isValidIdentifier(k) ? k : quoteKey(k)) + ': ' + _formatValue(v[k], depth + 1, seen))
+    out = entries.length ? '{ ' + entries.join(', ') + ' }' : '{}'
+  }
+  seen.delete(v)
+  return out
 }

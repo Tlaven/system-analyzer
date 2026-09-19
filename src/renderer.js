@@ -2,6 +2,19 @@ import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, NODE_RADIUS, PORT_R, A
 import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, formatScalar } from './utils.js'
 import { deriveEdges, nodeIndex, _equal } from './codegraph.js'
 import { getCycleMembers } from './engine.js'
+import { deriveProbeEdges } from './probe.js'
+
+// 探测边端点:从节点中心沿连线方向与矩形边界求交(medium/full;minimal 走 edgePts 圆周)
+function rectExit(n, other) {
+  const r = getNodeRect(n)
+  const dx = other.x - n.x, dy = other.y - n.y
+  const d = Math.hypot(dx, dy) || 1
+  const ux = dx / d, uy = dy / d
+  const tx = ux !== 0 ? (r.w / 2) / Math.abs(ux) : Infinity
+  const ty = uy !== 0 ? (r.h / 2) / Math.abs(uy) : Infinity
+  const t = Math.min(tx, ty)
+  return { x: n.x + ux * t, y: n.y + uy * t }
+}
 
 export function drawGrid() {
   const pc = getPaletteColors()
@@ -126,6 +139,46 @@ export function render() {
     if (_pulseP >= 1) { state.pulse = null; _pulseP = -1 }
   }
   const _pulseHit = (v) => _pulseP >= 0 && (!state.pulse.vars || state.pulse.vars.has(v))
+
+  // B-L1 探测边:声明边(实线,作者意图)之下画虚线灰(隐式引用,推而得之)。
+  // 差集口径:同一 (source,target) 已有声明边则不再画探测边(探测 - 声明 = 未声明的隐式依赖)。
+  const _declaredPairs = new Set(_allEdges.map(e => e.source_instance + '>' + e.target_instance))
+  for (const pe of deriveProbeEdges(state)) {
+    if (_declaredPairs.has(pe.id) || pe.source_instance === pe.target_instance) continue
+    const s = _byId.get(pe.source_instance), t = _byId.get(pe.target_instance)
+    if (!s || !t) continue
+    let p1, p2
+    if (config.infoLevel === 'minimal') ({ p1, p2 } = edgePts(s, t, pe))
+    else { p1 = rectExit(s, t); p2 = rectExit(t, s) }
+    ctx.save()
+    ctx.strokeStyle = pc.text3
+    ctx.globalAlpha = 0.5
+    ctx.lineWidth = 1.4
+    ctx.setLineDash([4, 4])
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke()
+    ctx.setLineDash([])
+    // 小箭头(方向 = 引用方向)
+    const pang = Math.atan2(p2.y - p1.y, p2.x - p1.x)
+    ctx.beginPath(); ctx.moveTo(p2.x, p2.y)
+    ctx.lineTo(p2.x - 8 * Math.cos(pang - Math.PI / 6), p2.y - 8 * Math.sin(pang - Math.PI / 6))
+    ctx.lineTo(p2.x - 8 * Math.cos(pang + Math.PI / 6), p2.y - 8 * Math.sin(pang + Math.PI / 6))
+    ctx.closePath(); ctx.fillStyle = pc.text3; ctx.fill()
+    // field-path 标签(仅 medium/full,minimal 保持鸟瞰)
+    if (config.infoLevel !== 'minimal') {
+      const label = pe.fields[0] + (pe.fields.length > 1 ? ' ×' + pe.fields.length : '')
+      const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2 + 12
+      ctx.font = '10px "Microsoft YaHei",sans-serif'
+      const txt = truncateText(ctx, label, 120)
+      const tw = ctx.measureText(txt).width
+      ctx.globalAlpha = 0.7
+      ctx.fillStyle = pc.bg
+      ctx.fillRect(mx - tw / 2 - 3, my - 8, tw + 6, 13)
+      ctx.fillStyle = pc.text3
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText(txt, mx, my - 1)
+    }
+    ctx.restore()
+  }
 
   for (const e of _allEdges) {
     const s = _byId.get(e.source_node), t = _byId.get(e.target_node)

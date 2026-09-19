@@ -14,6 +14,7 @@
 
 import { state } from './state.js'
 import { deriveEdges } from './codegraph.js'
+import { invalidateProbes } from './probe.js'
 
 const EXEC_TIMEOUT_MS = 100
 const TRACE_CAP = 200  // A1:每 varName.attr 环形缓冲上限(roadmap)
@@ -175,6 +176,8 @@ function evalTransforms() {
       }
     }
   }
+  // transform 可能把引用赋给目标 attrs(B-L1 探测边失效源)
+  invalidateProbes()
 }
 
 // 独立 transform 求值入口,不受 execMode 抑制(ADR-003 OQ#2)。
@@ -231,6 +234,7 @@ export function stepAll() {
 
   state.tickCount++
   recordTraces()
+  invalidateProbes()  // 方法体可能改引用(B-L1 探测边失效源)
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('sa-tick', { detail: { tickCount: state.tickCount, vars: ran } }))
   }

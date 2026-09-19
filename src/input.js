@@ -13,6 +13,7 @@ import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRe
 import { stepAll, propagate, runTransforms } from './engine.js'
 import { splitSource, isSourceCodeProgrammatic } from './parser.js'
 import { runSource, _equal, formatValue } from './codegraph.js'
+import { deriveProbeEdges } from './probe.js'
 
 // 测试与调试钩子
 window.state = state
@@ -22,6 +23,7 @@ window.deriveEdges = () => deriveEdges(state)
 window.invalidateEdges = invalidateEdges
 window.__sa_test = window.__sa_test || {}
 window.__sa_test.importJSON = importJSON
+window.__sa_test.probeEdges = () => deriveProbeEdges(state)
 window.setEditMode = setEditMode
 // v0.7 Phase 5: 暴露给测试用的辅助函数
 window.selectEdge = selectEdge

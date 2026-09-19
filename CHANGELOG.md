@@ -10,7 +10,7 @@
   - **A1 属性时序记录**——`state.traces[varName][attr] = {tick, value}[]`,环形缓冲 200,`stepAll` 每 tick 写入(只记数值型 own attrs);panel 数值属性行内嵌 mini sparkline,连播时原地重绘不重建 panel
   - **A2 步进连播**——执行模式 `step` 下新增 `▶ 连播/⏸ 暂停` + 速度三档(慢 1s / 中 0.5s / 快 0.15s,`config.playSpeed` 持久化),`setInterval(stepAll)` 驱动;换图(`runtimeGen` 变)/切模式自动停
   - **A3 环边标记**——Tarjan SCC 识别真环成员(与 Kahn 剩余"环内+下游"区分),两端均为环成员的边在画布红色虚线覆盖(直/曲/折线同路径)
-- `scripts/test-engine.mjs`——引擎 Node 单测(现 19 项):traces 写入/环形缓冲/runSource 清空/环成员识别/派生边 transform+description 字段
+- `scripts/test-engine.mjs`——引擎 Node 单测(现 32 项):traces 写入/环形缓冲/runSource 清空/环成员识别/派生边字段/B-L1 探测边(收敛计数、实例边界、限深防环、stepAll 失效、引用 round-trip)
 - e2e 测试 36–39:连播/暂停/换图停播/时序记录 + sparkline/环成员识别
 - **显示通道批次(visualization-modes.md §10,5 通道 + 2 假 affordance 清除)**:
   - 通道 1:transform 活性 ƒ 角标(边路径中点,三档全含;`deriveEdges` 增派 `transform` 字段)
@@ -21,9 +21,14 @@
   - 假 affordance A:Code 模式不再画拖柄,且切换 Code 时补 render 立即生效
   - 假 affordance B:Code 模式空画布提示不再指向"+/双击新建"
 - e2e 测试 40–42:显示通道数据面 / 执行脉冲触发与过期 / Code 模式假 affordance 清除;`test-engine.mjs` 补派生边 transform 字段断言
+- **双层边(探测边)L1(ADR-006,B-L1)**:
+  - 新建 `src/probe.js`:`deriveProbeEdges(state)` 遍历 attrs 引用推得隐式依赖——plain object/array 限深 4 + visited 防环,命中 `__instId` 对象即记且不深入(防 A→B→C 传染),跳过 `edges`/`__` 键;同对多引用收敛一条,`fields` 记全部 field-path;lazy 缓存 + `invalidateProbes`(失效点:`invalidateEdges` 聚合 / `runSource` / `evalTransforms` / `stepAll`)
+  - renderer 在声明边下层画探测边:灰虚线 + 小箭头 + field-path 标签(仅 medium/full,首路径 + ×N);同对已有声明边则不画(探测 − 声明 = 未声明隐式依赖);新增 `rectExit`(medium/full 端点)+ `__sa_test.probeEdges` 测试钩子
+- e2e 测试 43:探测边数据面 / 渲染不崩 / 引用以 varName 序列化
 
 ### Changed
 
+- **`formatValue` 支持实例引用保持身份(ADR-006)**——直接引用(带 `__instId`)输出目标 varName,容器内任意深度引用递归输出 varName(不再 `JSON.stringify` 成副本);容器环/超深(>8)降级 `null`。不修的话:panel 一编辑 → `syncCodeFromRuntime` 把引用静默变拷贝 → 重载后引用身份与探测边一起消失
 - **state.js `CanvasRenderingContext2D` polyfill 加 `typeof` guard**——engine.js 现可在 Node 直接 import(兑现 v0.13 "引擎 pure 化可 Node 测试"的承诺,此前 state.js 顶层 polyfill 会抛 `CanvasRenderingContext2D is not defined`)
 - `runSource` 现在清空演化层(`state.traces` / `tickCount`)并递增 `state.runtimeGen`(连播守卫:换图即停);演化数据仍不入 sourceCode/URL(ADR-005)
 - renderer.js 抽取 `drawEdgePath()` helper——主路径 / 环边标记 / dashFlow 动画三处共用,消除路径绘制重复

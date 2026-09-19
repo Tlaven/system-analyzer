@@ -30,7 +30,8 @@ ADR 是挡回重复提议的唯一挡箭牌。
 
 | 编号 | 标题 | 状态 | 日期 |
 |---|---|---|---|
-| [ADR-005](adr-005-execution-observation.md) | 执行观测立柱(推翻"step 不激活") | accepted / MVP 未做 | 2026-09-14 |
+| [ADR-006](adr-006-probe-edges-l1.md) | 双层边(探测边)L1 | accepted | 2026-09-15 |
+| [ADR-005](adr-005-execution-observation.md) | 执行观测立柱(推翻"step 不激活") | accepted / MVP 已实现 | 2026-09-14 |
 | [ADR-004](adr-004-unicode-identifiers.md) | 中文/Unicode 标识符支持(回溯补记) | accepted | 2026-09-14 |
 | [ADR-003](adr-003-edge-transform-expressions.md) | 边级 transform 表达式 | accepted | 2026-06-24 |
 | [ADR-001](adr-001-instance-level-edges.md) | 边模型从 class 级迁到实例级 | accepted | 2026-06-18 |

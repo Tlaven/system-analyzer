@@ -1196,6 +1196,42 @@ console.log('\n测试 42：假 affordance 清除(Code 模式空画布提示)')
   check('UI 模式恢复 +/双击提示', uiHint.includes('双击'), uiHint)
 }
 
+console.log('\n测试 43：B-L1 探测边(数据面 + 渲染不崩 + 不序列化探测元数据)')
+{
+  const PROBE_SAMPLE = `class Node { attrs = { x: 0, ref: null, pool: null } }
+class Hub { attrs = { y: 0 } }
+
+const Hub_1 = GraphStarter.add(Hub)
+const Node_1 = GraphStarter.add(Node)
+const Node_2 = GraphStarter.add(Node)
+Node_1.ref = Hub_1
+Node_1.pool = [Hub_1]
+Node_2.ref = Hub_1
+Node_1.edges = [{ target: Node_2 }]`
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: '探测边' })
+  }, PROBE_SAMPLE)
+  const probes = await page.evaluate(() => window.__sa_test.probeEdges().map(p => ({ id: p.id, fields: p.fields })))
+  const byId = Object.fromEntries(probes.map(p => [p.id, p]))
+  check('探测边 2 条', probes.length === 2, probes)
+  check('Node_1→Hub_1 收敛 fields = ref,pool[0]',
+    !!byId['Node_1>Hub_1'] && byId['Node_1>Hub_1'].fields.join(',') === 'ref,pool[0]', byId['Node_1>Hub_1'])
+  check('声明边不重复产探测边', !byId['Node_1>Node_2'], Object.keys(byId))
+
+  // 显式重绘一次(走后端渲染路径含探测边绘制)
+  await page.evaluate(() => window.dispatchEvent(new Event('resize')))
+  const rendered = await page.evaluate(() => window.state.runtimeInstances.length)
+  check('渲染探测边无异常', rendered === 3, rendered)
+
+  // UI 编辑触发 syncCodeFromRuntime 后,引用仍以 varName 持久化(不被 JSON 化成副本)
+  const src = await page.evaluate(() => {
+    window.syncCodeFromRuntime()
+    return window.state.sourceCode
+  })
+  check('引用以 varName 序列化(Node_1.ref = Hub_1)', src.includes('Node_1.ref = Hub_1'), src.slice(0, 60))
+  check('数组内引用以 varName 序列化', src.includes('Node_1.pool = [Hub_1]'), src.slice(0, 60))
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

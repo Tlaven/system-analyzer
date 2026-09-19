@@ -13,6 +13,7 @@
 | **入口/编排** | `src/main.js` | init 顺序:URL hash > localStorage > DEFAULT_BOOTSTRAP;装配 state/panel/codeview/renderer |
 | **状态** | `src/state.js` | runtimeInstances / sourceCode / visualState / panelMode / traces(演化层,ADR-005) 等运行时状态(单例) |
 | **代码层(真相源)** | `src/codegraph.js` | `runSource` 执行 sourceCode、`serializeCode` 反向构建、`makeBridge` 提供 `GraphStarter.add`、`deriveEdges(state)` + lazy 缓存派生边视图(v0.13 从 io.js 迁入) |
+| **探测边派生** | `src/probe.js` | `deriveProbeEdges(state)`:遍历 attrs 引用推得隐式依赖(同对收敛 + 实例边界,ADR-006),lazy 缓存 + `invalidateProbes`;纯派生不序列化 |
 | **scanner** | `src/scanner.js` | 静态分析 sourceCode 字符串,提取 class 定义(读 `new cls()` 实例的 3 个 class field) |
 | **运行时层** | `src/io.js` | `wrapInstance` 加 getter、state 别名 |
 | **执行引擎** | `src/engine.js` | `topologicalSort` / `propagate` / `stepAll`(方法体调度,Code 模式方法体才生效)+ `evalTransforms` / `runTransforms`(边级 transform 表达式,ADR-003,跨模式生效)+ `getCycleMembers`(Tarjan SCC,ADR-005 A3)。v0.13 pure 化:无 DOM/render 依赖,`stepAll` 通过 `dispatchEvent('sa-tick')` 通知 UI;`stepAll` 末尾写 `state.traces`(A1)。**可 Node 单测**(`scripts/test-engine.mjs`) |
@@ -218,6 +219,8 @@ Code 模式交互:
 
 **执行观测(ADR-005 MVP)**. `stepAll()` 每 tick 末尾把数值型 own attrs 写入 `state.traces`(环形缓冲 200),panel 数值属性行渲染 mini sparkline,连播时 input.js 的 `sa-tick` 监听原地重绘。连播控件(▶/⏸ + 速度三档)在 `input.js`:`setInterval(stepAll)` 驱动,`state.runtimeGen`(runSource 递增)守卫换图即停。环边标记:`getCycleMembers()` 用 Tarjan SCC 区分真环成员与 Kahn 剩余的下游节点,renderer 对两端均为环成员的边叠加红色虚线。propagate 是"同一时刻的因果重算"(不动时钟),trace 的 tick 只由 stepAll 推进。**执行脉冲**(显示通道 5):engine 只发事件(stepAll → `sa-tick`、propagate → `sa-propagate`,detail.vars = 实际执行集合),input.js `triggerPulse` 驱动 0.5s rAF,renderer 读 `state.pulse` 画边波点 + 节点扩散环,过期由 render 清除。
 
+**双层边(ADR-006 L1)**. 声明边(`attrs.edges`,实线)= 作者意图;探测边(虚线灰)= 从 attrs 引用推而得的运行时事实,纯派生、不序列化。口径:`deriveProbeEdges` 遍历 plain object/array(限深 4 + visited 防环),命中带 `__instId` 的对象记引用且不深入(防 A→B→C 传染);同对多引用收敛一条,`fields` 记全部 field-path;跳过 `edges`/`__` 键;渲染时同对已有声明边则不画(探测 − 声明 = 隐式依赖)。失效点:`invalidateEdges`(结构变更聚合)/`runSource`/`evalTransforms`/`stepAll`;读时 lazy 重算。配套:引用值 attr 序列化为 varName(`formatValue` 递归保身份,否则 panel 一编辑就被 JSON 化成副本)。
+
 **持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。**载入失败保护**:`load()` 反序列化成功但 `runSource` 失败时置 `state.loadError`,`save()` 拒绝覆盖 `sa_data`(防止空画布的下一次编辑抹掉用户图);`loadError` 由成功操作清除(onNew / importSource / codeview commitCode 成功)。**载入守卫**:importSource 校验 version(≠6 拒绝)、尊重数据里的 editMode、UI 模式 + 程序化 sourceCode 时 confirm 推荐切 Code 模式载入。
 
 **旧格式硬切换。** v0.9 之前的 `sa_data`(version !== 6,含 v0.5 / v0.6 / v0.7 / v0.8)与 v0.9 不兼容(实例级 edges 模型与历史 class.edges + null 槽风格不兼容)。`load()` 检测到旧版本会丢弃并清空 `sa_data`,返回 false → 走 DEFAULT_BOOTSTRAP(空)。
@@ -296,3 +299,8 @@ v0.6/v0.8 时代的"命名端口"被 v0.9 砍掉——边是实例级数组,端�
 
 22. **traces 只在 `stepAll` 写入,`runSource` 清空**。propagate 是"同一时刻的因果重算"(不动时钟,不产生时间点);tick 只由 stepAll 推进。`state.runtimeGen` 每次 `runSource` 递增,连播(`input.js`)据此换图即停。
 23. **环成员识别是渲染层数据,不参与执行跳过**。`getCycleMembers()`(Tarjan SCC)只标真环成员;`_topoError`(Kahn 剩余 = 环内 + 下游)保持"执行跳过"原语义,二者不合并。
+
+### 双层边不变量(ADR-006)
+
+24. **探测边纯派生,不入 sourceCode、不入 URL hash**。`deriveProbeEdges` 只读 attrs;同对多引用收敛一条;命中实例边界即停(不穿透目标 attrs);跳过 `edges`/`__` 键;渲染层执行"探测 − 声明"差集(已有声明边不画探测边)。失效点必须覆盖:任何改引用或改实例集合的入口(`invalidateEdges` 聚合结构变更,engine 的 `evalTransforms`/`stepAll` 覆盖运行时赋值)。
+25. **引用值 attr 序列化为 varName,不得 JSON 化成副本**。`formatValue` 对直接引用(带 `__instId`)输出目标 varName,对容器内任意深度引用递归保持身份;容器环/超深(>8)降级 `null`。这是"探测边跨 session 存活"的前提。

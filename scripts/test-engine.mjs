@@ -2,8 +2,9 @@
 // 引擎 v0.13 起 pure（无 DOM/render 依赖）；state.js polyfill 有 Node guard。
 // 运行：node scripts/test-engine.mjs（直接 import src，无需 build）
 import { state } from '../src/state.js'
-import { runSource, deriveEdges } from '../src/codegraph.js'
+import { runSource, deriveEdges, serializeCode } from '../src/codegraph.js'
 import { stepAll, getCycleMembers, topologicalSort } from '../src/engine.js'
+import { deriveProbeEdges } from '../src/probe.js'
 
 let pass = 0, fail = 0
 function check(name, cond, detail) {
@@ -107,6 +108,77 @@ console.log('\n测试 6：自环算环成员')
   runSource(SELF_LOOP_SAMPLE, state)
   const members = Array.from(getCycleMembers())
   check('自环节点在集合内', members.join(',') === 'S_1', members)
+}
+
+const PROBE_SAMPLE = `class Node { attrs = { x: 0, ref: null, pool: null, nest: null, loop: null } }
+class Hub { attrs = { y: 0 } }
+
+const Hub_1 = GraphStarter.add(Hub)
+const Node_1 = GraphStarter.add(Node)
+const Node_2 = GraphStarter.add(Node)
+Node_1.ref = Hub_1
+Node_1.pool = [Hub_1, Hub_1]
+Node_1.nest = { deep: { leaf: Hub_1 } }
+Node_2.ref = Hub_1
+Node_2.nest = { a: { b: { c: { d: Hub_1 } } } }
+const cyc = {}
+cyc.self = cyc
+Node_2.loop = cyc
+Node_1.edges = [{ target: Node_2 }]`
+
+console.log('\n测试 7：B-L1 探测边推导(收敛计数 / 实例边界 / 跳过 edges / 防环)')
+{
+  runSource(PROBE_SAMPLE, state)
+  const probes = deriveProbeEdges(state)
+  const byId = Object.fromEntries(probes.map(p => [p.id, p]))
+  check('探测边收敛为 2 条', probes.length === 2, probes.map(p => p.id))
+  check('Node_1→Hub_1 计数 4 + field-path 顺序',
+    !!byId['Node_1>Hub_1'] && byId['Node_1>Hub_1'].fields.join(',') === 'ref,pool[0],pool[1],nest.deep.leaf',
+    byId['Node_1>Hub_1'])
+  check('Node_2→Hub_1 fields = ref(深 5 层被限深丢弃 + 容器环不递归)',
+    !!byId['Node_2>Hub_1'] && byId['Node_2>Hub_1'].fields.join(',') === 'ref',
+    byId['Node_2>Hub_1'])
+  check('声明边不产探测边(Node_1→Node_2)', !byId['Node_1>Node_2'], Object.keys(byId))
+  check('lazy 缓存:重复调用返回同一数组', deriveProbeEdges(state) === probes)
+}
+
+const BREAK_SAMPLE = `class Breaker {
+  attrs = { ref: null }
+  tick() { this.ref = null }
+}
+class Target { attrs = { v: 0 } }
+
+const Target_1 = GraphStarter.add(Target)
+const Breaker_1 = GraphStarter.add(Breaker)
+Breaker_1.ref = Target_1`
+
+console.log('\n测试 8：B-L1 失效(stepAll 改引用后重算)')
+{
+  runSource(BREAK_SAMPLE, state)
+  check('初始有 Breaker_1→Target_1 探测边',
+    deriveProbeEdges(state).some(p => p.id === 'Breaker_1>Target_1'), deriveProbeEdges(state))
+  stepAll()
+  check('stepAll 清引用后探测边消失',
+    !deriveProbeEdges(state).some(p => p.id === 'Breaker_1>Target_1'), deriveProbeEdges(state))
+}
+
+console.log('\n测试 9：B-L1 引用序列化(override/容器内引用保持身份 + round-trip)')
+{
+  runSource(PROBE_SAMPLE, state)
+  const code = serializeCode(state)
+  const overrides = code.split('\n').filter(l => l.includes('Node_1.') || l.includes('Node_2.'))
+  check('ref override 序列化为 varName', code.includes('Node_1.ref = Hub_1'), overrides.slice(0, 6))
+  check('数组内引用序列化为 varName', code.includes('Node_1.pool = [Hub_1, Hub_1]'), overrides.slice(0, 6))
+  check('嵌套对象内引用序列化为 varName', code.includes('leaf: Hub_1'), overrides.slice(0, 6))
+  check('容器环降级 null 不炸', code.includes('self: null'), overrides.slice(0, 6))
+
+  runSource(code, state)
+  const byId2 = Object.fromEntries(deriveProbeEdges(state).map(p => [p.id, p]))
+  check('round-trip 后探测边仍在且 field 数不变',
+    !!byId2['Node_1>Hub_1'] && byId2['Node_1>Hub_1'].fields.length === 4, byId2['Node_1>Hub_1'])
+  check('round-trip 后引用身份仍是 attrs(非副本)',
+    state.runtimeInstances.find(i => i.varName === 'Node_1').attrs.ref ===
+    state.runtimeInstances.find(i => i.varName === 'Hub_1').attrs)
 }
 
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)

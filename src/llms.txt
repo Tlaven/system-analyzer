@@ -81,8 +81,9 @@ class Processor {
 - **3 个 class field(实例级,无 static 前缀)**:
   - `description` (string):class 默认描述
   - `name` (string,可选):class 默认名(空时画布回退到 className)
-  - `attrs` (`{ key: value, ... }`):class 默认属性字典(纯数据,**无 null 引用槽**)
+  - `attrs` (`{ key: value, ... }`):class 默认属性字典(**纯数据**:数字/字符串/布尔/普通对象/数组;不要写实例引用作默认值——class 定义时实例还不存在)
 - **边在实例级 attrs.edges 数组**:每条 `{ target, description, transform? }`,target 指向另一实例的 attrs,transform 是可选响应式公式(见下)
+- **引用值属性**:实例 attrs 的值可以直接指向另一实例的 attrs(如 `A_1.leader = B_1`,容器内嵌套引用也行)。这类**隐式引用**会以灰虚线"探测边"自动画在图上(与声明边同对时收敛),序列化时保持 varName 身份、跨 session 存活;作者想表达显式依赖仍应写 `edges`
 - **多边支持**:一个实例可以有任意多条 edges(多对一 / 多对多 / 同目标多边都行)
 - **attrs 是真正的追加字典**:实例能加 class 没有的字段(包括 `edges`),runSource 后保留
 - **3 类 attrs 字段**:`name`/`description`(元信息)/ `edges`(边数组)/ 其他(数据属性,画为属性行)
