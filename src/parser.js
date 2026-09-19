@@ -485,3 +485,287 @@ export function isSourceCodeProgrammatic(code) {
   } catch (_) { /* splitSource 失败：保守起见视为程序化 */ return true }
   return false
 }
+
+// ============================================================
+// ADR-008:外部导入可信度分类
+// 返回 'declarative' | 'programmatic' | 'unknown'
+//   declarative — 只含模型认识的声明式语句,可静默运行
+//   programmatic — 控制流/方法体/箭头函数,执行前需用户确认
+//   unknown — 无法归类(保守,同样需要确认)
+// 注意:这是安全闸门判定,不是完整 JS 解析器。只放行白名单语法,
+// 任何无法证明"无函数调用"的构造一律拒绝(宁可误闸,不可误放)。
+// 与 isSourceCodeProgrammatic 的分工:后者判"切 UI 模式会丢什么"(粗,可误伤);
+// 本函数是安全边界,必须字符串/注释感知(transform 字符串里常见 if( )。
+// ============================================================
+
+const _IDENT_START_RE = /[\p{L}_$]/u
+
+function _isIdentStart(ch) { return !!ch && _IDENT_START_RE.test(ch) }
+
+function _skipWSComments(c) {
+  while (!c.eof()) {
+    if (/\s/.test(c.peek())) { c.next(); continue }
+    if (c.peek() === '/') { if (scanComment(c)) continue }
+    break
+  }
+}
+
+function _peekWord(c) {
+  if (!_isIdentStart(c.peek())) return null
+  const saved = c.pos
+  const w = scanIdentifier(c)
+  c.pos = saved
+  return w
+}
+
+function _consumeWord(c, word) {
+  if (_peekWord(c) !== word) return false
+  for (let i = 0; i < word.length; i++) c.next()
+  return true
+}
+
+// 把字符串/注释/模板串替换为等长空白,只留可执行骨架(用于控制流关键字检测)
+function _stripStringsAndComments(code) {
+  const c = new Cursor(code)
+  let out = ''
+  while (!c.eof()) {
+    const ch = c.peek()
+    if (ch === '/') {
+      const saved = c.pos
+      const cm = scanComment(c)
+      if (cm) { out += ' '.repeat(cm.endPos - saved); continue }
+      out += c.next()
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      const start = c.pos
+      c.next()
+      skipString(c, ch)
+      out += ' '.repeat(c.pos - start)
+      continue
+    }
+    if (ch === '`') {
+      const start = c.pos
+      c.next()
+      skipTemplateLiteral(c)
+      out += ' '.repeat(c.pos - start)
+      continue
+    }
+    out += c.next()
+  }
+  return out
+}
+
+// 字面量 / 裸标识符(实例引用)。消费成功返回 true。
+// 支持:字符串(单/双引号、无插值模板串)、数字(负/小数/指数/进制)、
+// true/false/null/undefined/NaN/Infinity、数组、对象(键为标识符或字符串;
+// 拒绝 __proto__)、裸标识符。其余(函数/箭头/成员访问/调用/模板插值/
+// 展开/计算键)一律 false → 上层归 unknown。
+function _consumeLiteral(c, depth) {
+  if (depth > 20) return false
+  _skipWSComments(c)
+  const ch = c.peek()
+  if (!ch) return false
+  if (ch === "'" || ch === '"') { c.next(); skipString(c, ch); return true }
+  if (ch === '`') {
+    c.next()
+    while (!c.eof()) {
+      const t = c.peek()
+      if (t === '\\') { c.next(); c.next(); continue }
+      if (t === '$' && c.peek(1) === '{') return false
+      if (t === '`') { c.next(); return true }
+      c.next()
+    }
+    return false
+  }
+  if (ch === '[') {
+    c.next()
+    while (true) {
+      _skipWSComments(c)
+      if (c.peek() === ']') { c.next(); return true }
+      if (!_consumeLiteral(c, depth + 1)) return false
+      _skipWSComments(c)
+      if (c.peek() === ',') { c.next(); continue }
+      if (c.peek() === ']') { c.next(); return true }
+      return false
+    }
+  }
+  if (ch === '{') {
+    c.next()
+    while (true) {
+      _skipWSComments(c)
+      if (c.peek() === '}') { c.next(); return true }
+      let key = null
+      if (_isIdentStart(c.peek())) key = scanIdentifier(c)
+      else if (c.peek() === "'" || c.peek() === '"') {
+        const q = c.peek(); c.next()
+        key = ''
+        while (!c.eof() && c.peek() !== q) {
+          if (c.peek() === '\\') { c.next(); key += c.next() }
+          else key += c.next()
+        }
+        if (c.eof()) return false
+        c.next()
+      } else return false
+      if (key === '__proto__') return false
+      _skipWSComments(c)
+      if (c.peek() !== ':') return false
+      c.next()
+      if (!_consumeLiteral(c, depth + 1)) return false
+      _skipWSComments(c)
+      if (c.peek() === ',') { c.next(); continue }
+      if (c.peek() === '}') { c.next(); return true }
+      return false
+    }
+  }
+  if (ch === '-' || ch === '.' || (ch >= '0' && ch <= '9')) {
+    const rest = c.code.slice(c.pos)
+    const m = rest.match(/^-?(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)/)
+    if (m) {
+      for (let i = 0; i < m[0].length; i++) c.next()
+      return true
+    }
+    if (ch === '-') {
+      c.next()
+      if (_consumeWord(c, 'Infinity') || _consumeWord(c, 'NaN')) return true
+      return false
+    }
+    return false
+  }
+  if (_isIdentStart(ch)) { scanIdentifier(c); return true }
+  return false
+}
+
+// class 体白名单:只允许 description/name/attrs 三个数据字段(值为字面量)。
+// 方法/constructor/getter → programmatic;未知字段(static 等)→ unknown。
+function _classifyClass(source) {
+  const c = new Cursor(source)
+  if (!_consumeWord(c, 'class')) return 'unknown'
+  _skipWSComments(c)
+  if (!_isIdentStart(c.peek())) return 'unknown'
+  scanIdentifier(c)
+  _skipWSComments(c)
+  if (_peekWord(c) === 'extends') {
+    _consumeWord(c, 'extends')
+    _skipWSComments(c)
+    if (!_isIdentStart(c.peek())) return 'unknown'
+    scanIdentifier(c)
+    _skipWSComments(c)
+  }
+  if (c.peek() !== '{') return 'unknown'
+  c.next()
+  while (true) {
+    _skipWSComments(c)
+    if (c.eof()) return 'unknown'
+    if (c.peek() === '}') return 'declarative'
+    if (c.peek() === ';') { c.next(); continue }
+    if (!_isIdentStart(c.peek())) return 'unknown'
+    const field = scanIdentifier(c)
+    _skipWSComments(c)
+    if (c.peek() === '(') return 'programmatic'
+    if (c.peek() !== '=') return 'unknown'
+    c.next()
+    _skipWSComments(c)
+    if (field === 'description' || field === 'name') {
+      const q = c.peek()
+      if (q !== "'" && q !== '"' && q !== '`') return 'unknown'
+      if (!_consumeLiteral(c, 0)) return 'unknown'
+    } else if (field === 'attrs') {
+      if (!_consumeLiteral(c, 0)) return 'unknown'
+    } else {
+      return 'unknown'
+    }
+    _skipWSComments(c)
+    if (c.peek() === ';') c.next()
+  }
+}
+
+// 启动段白名单:GraphStarter.add 声明 + 实例 override/edges 赋值
+function _isDeclarativeBootstrap(boot) {
+  const c = new Cursor(boot)
+  while (true) {
+    _skipWSComments(c)
+    if (c.eof()) return true
+    if (c.peek() === ';') { c.next(); continue }
+    const w = _peekWord(c)
+    if (w === 'const' || w === 'let' || w === 'var') {
+      _consumeWord(c, w)
+      _skipWSComments(c)
+      if (!_isIdentStart(c.peek())) return false
+      scanIdentifier(c)
+      _skipWSComments(c)
+      if (c.peek() !== '=') return false
+      c.next()
+      _skipWSComments(c)
+      if (!_consumeWord(c, 'GraphStarter')) return false
+      _skipWSComments(c)
+      if (c.peek() !== '.') return false
+      c.next()
+      _skipWSComments(c)
+      if (!_consumeWord(c, 'add')) return false
+      _skipWSComments(c)
+      if (c.peek() !== '(') return false
+      c.next()
+      _skipWSComments(c)
+      if (!_isIdentStart(c.peek())) return false
+      scanIdentifier(c)
+      _skipWSComments(c)
+      if (c.peek() === ',') {
+        c.next()
+        _skipWSComments(c)
+        const q = c.peek()
+        if (q !== "'" && q !== '"') return false
+        c.next(); skipString(c, q)
+        _skipWSComments(c)
+      }
+      if (c.peek() !== ')') return false
+      c.next()
+      if (c.peek() === ';') c.next()
+      continue
+    }
+    // IDENT.accessor = 字面量/引用
+    if (!_isIdentStart(c.peek())) return false
+    scanIdentifier(c)
+    _skipWSComments(c)
+    if (c.peek() === '.') {
+      c.next()
+      _skipWSComments(c)
+      if (!_isIdentStart(c.peek())) return false
+      scanIdentifier(c)
+    } else if (c.peek() === '[') {
+      c.next()
+      _skipWSComments(c)
+      const q = c.peek()
+      if (q !== "'" && q !== '"') return false
+      c.next(); skipString(c, q)
+      _skipWSComments(c)
+      if (c.peek() !== ']') return false
+      c.next()
+    } else {
+      return false
+    }
+    _skipWSComments(c)
+    if (c.peek() !== '=') return false
+    c.next()
+    if (!_consumeLiteral(c, 0)) return false
+    if (c.peek() === ';') c.next()
+  }
+}
+
+export function classifySource(code) {
+  if (typeof code !== 'string') return 'unknown'
+  if (!code.trim()) return 'declarative'
+  let clean
+  try { clean = _stripStringsAndComments(code) } catch (_) { return 'unknown' }
+  if (/\b(?:for\s*\(|while\s*\(|if\s*\(|switch\s*\(|function\b|=>)/.test(clean)) return 'programmatic'
+  let split
+  try { split = splitSource(code) } catch (_) { return 'unknown' }
+  for (const c of split.classes) {
+    const kind = _classifyClass(c.source)
+    if (kind !== 'declarative') return kind
+  }
+  try {
+    if (!_isDeclarativeBootstrap(split.bootstrap)) return 'unknown'
+  } catch (_) { return 'unknown' }
+  return 'declarative'
+}

@@ -784,7 +784,9 @@ export function initInput() {
           // 不是 JSON，当成裸 sourceCode
           data = { sourceCode: text, title: file.name.replace(/\.js$/i, '') }
         }
-        pushUndo(); importJSON(data); save(); render()
+        pushUndo()
+        const ok = importJSON(data)
+        if (ok) { save(); render() }
       } catch (err) { alert('导入失败：' + err.message) }
     }
     r.readAsText(file)

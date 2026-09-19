@@ -32,9 +32,10 @@ function init() {
   if (hash) {
     try {
       const data = JSON.parse(fromB64(hash))
-      importSource(data)
-      save()
-      loaded = true
+      if (importSource(data)) {
+        save()
+        loaded = true
+      }
     } catch (e) {
       alert('分享链接载入失败：' + e.message + '\n\n将回退到本地已保存的图(如有)。')
     }

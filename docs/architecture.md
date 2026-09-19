@@ -16,6 +16,7 @@
 | **探测边派生** | `src/probe.js` | `deriveProbeEdges(state)`:遍历 attrs 引用推得隐式依赖(同对收敛 + 实例边界,ADR-006),lazy 缓存 + `invalidateProbes`;纯派生不序列化 |
 | **作者态快照** | `src/author.js` | `captureAuthorAttrs`(runSource 捕获)/ `setAuthorAttr` / `deleteAuthorAttr` / `markEdgesEdited`(UI 编辑写穿);serializeCode 的序列化源(ADR-007) |
 | **scanner** | `src/scanner.js` | 静态分析 sourceCode 字符串,提取 class 定义(读 `new cls()` 实例的 3 个 class field) |
+| **parser** | `src/parser.js` | `splitSource` / `isSourceCodeProgrammatic`(切模式丢什么)+ `classifySource`(外部导入分类器,ADR-008:declarative/programmatic/unknown 三值,`importSource` 闸门判定) |
 | **运行时层** | `src/io.js` | `wrapInstance` 加 getter、state 别名 |
 | **执行引擎** | `src/engine.js` | `topologicalSort` / `propagate` / `stepAll`(方法体调度,Code 模式方法体才生效)+ `evalTransforms` / `runTransforms`(边级 transform 表达式,ADR-003,跨模式生效)+ `getCycleMembers`(Tarjan SCC,ADR-005 A3)。v0.13 pure 化:无 DOM/render 依赖,`stepAll` 通过 `dispatchEvent('sa-tick')` 通知 UI;`stepAll` 末尾写 `state.traces`(A1)。**可 Node 单测**(`scripts/test-engine.mjs`) |
 | **持久化** | `src/main.js` 内 `load`/`save` | `sa_data` 存 `{version, sourceCode, visualState, ...}`,URL hash 分享 base64 |
@@ -181,6 +182,7 @@ class 默认值永远保留;实例 override 单独写在启动代码里(每个�
   main.js init()
     → load() 优先级:URL hash > localStorage(sa_data) > DEFAULT_BOOTSTRAP(空串)
     → 旧版本(version !== 6)硬切换:丢弃 sa_data,走 DEFAULT_BOOTSTRAP
+    → 外部导入(URL hash / 文件 / 粘贴)→ classifySource → (非声明式则确认)→ runSource
     → runSource(sourceCode) → scanner 提取 class → bridge.add 生成 runtimeInstances + varName
     → deriveEdges() 遍历所有 inst.attrs.edges 派生边视图
     → render() Canvas 绘制(按 infoLevel 三档)
@@ -312,3 +314,9 @@ v0.6/v0.8 时代的"命名端口"被 v0.9 砍掉——边是实例级数组,端�
 
 26. **serializeCode 的序列化源是 `state.authorAttrs`**(作者态快照),不是 live attrs。方法体/transform/`stepAll` 对 attrs 的写入不进 sourceCode;reset/undo/import/load 经 `runSource` 重建快照。
 27. **authorAttrs 生命周期与 runtimeInstances 对齐**。任何改 attrs 的 UI 入口必须写穿(panel/input/editor 的编辑路径同步调 `src/author.js` 的 set/delete/markEdgesEdited);author 缺失时 serializeCode 回退 live 仅作容错,不是行为契约。
+
+### 导入闸门不变量(ADR-008)
+
+28. **外部导入的 sourceCode 必须先过 `classifySource`**,`declarative` 才免确认;`load()`(localStorage)不过闸。
+29. **新外部入口必须走 `importSource`**(闸门唯一咽喉),不得绕过直接 `runSource`。
+30. **dist/index.html 必须携带 meta CSP**(含 `connect-src 'none'`);不得引入任何运行时网络请求(否则 CSP 反噬自身)。

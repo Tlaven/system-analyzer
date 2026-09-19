@@ -15,6 +15,7 @@ import { runTransforms, stepAll } from '../src/engine.js'
 import { setAuthorAttr, deleteAuthorAttr, markEdgesEdited, authorAttrsOf } from '../src/author.js'
 import { toB64, fromB64 } from '../src/utils.js'
 import { DEFAULT_BOOTSTRAP } from '../src/bootstrap.js'
+import { classifySource } from '../src/parser.js'
 
 let pass = 0, fail = 0
 function check(name, cond, detail) {
@@ -363,7 +364,7 @@ console.log('\n=== 区 3:编辑风暴(模拟 UI 反复改运行时 → 序列化
     }
   }
 
-  let mismatch = null, fixMismatch = null, crashed = null
+  let mismatch = null, fixMismatch = null, crashed = null, classifyBad = null
   let ops = 0
   for (let s = 0; s < STORMS && !(mismatch && fixMismatch && crashed); s++) {
     // 用一个确定性基础图(复用 fuzz 风格:手写小而全)
@@ -377,6 +378,9 @@ console.log('\n=== 区 3:编辑风暴(模拟 UI 反复改运行时 → 序列化
       let code
       try {
         code = serializeCode(state)
+        if (classifySource(code) !== 'declarative' && !classifyBad) {
+          classifyBad = { s, op, code: code.slice(0, 200) }
+        }
         runSource(code, state)
       } catch (e) { crashed = crashed || { s, op, msg: e.message, code: code && code.slice(0, 300) }; break }
       const after = sig(state)
@@ -391,6 +395,7 @@ console.log('\n=== 区 3:编辑风暴(模拟 UI 反复改运行时 → 序列化
   check('编辑风暴 ' + ops + ' 次操作:无异常', !crashed, crashed)
   check('编辑风暴 ' + ops + ' 次操作:往返语义守恒', !mismatch, mismatch)
   check('编辑风暴 ' + ops + ' 次操作:二次序列化零漂移', !fixMismatch, fixMismatch)
+  check('编辑风暴 ' + ops + ' 次操作:序列化产物必为 declarative', !classifyBad, classifyBad)
 }
 
 // ============================================================

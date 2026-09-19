@@ -15,7 +15,7 @@ import { pushUndo } from './editor.js'
 import { applyLayout, fitToView, spreadUnpositioned } from './physics.js'
 import { toB64 } from './utils.js'
 import { runSource, serializeCode } from './codegraph.js'
-import { isSourceCodeProgrammatic } from './parser.js'
+import { isSourceCodeProgrammatic, classifySource } from './parser.js'
 import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
 
 // ============ loadError 保护 ============
@@ -154,6 +154,19 @@ export function importSource(data) {
   if (data.version !== undefined && data.version !== 6) {
     throw new Error('旧版本数据 (v' + data.version + ') 与当前实例级 edges 模型不兼容')
   }
+  // ADR-008 外部导入执行闸门:声明式免确认;其余(程序化/未知)先确认。
+  // 闸门必须在任何 state mutation 之前,取消 = 完全不动当前状态。
+  const _level = classifySource(data.sourceCode)
+  if (_level !== 'declarative') {
+    const ok = confirm(
+      '此链接包含可执行代码(sourceCode 含方法体/控制流或无法归类)。\n\n' +
+      '是否载入并运行?\n' +
+      '确定 = 载入并运行\n' +
+      '取消 = 不载入(保留当前图)'
+    )
+    if (!ok) return false
+  }
+
   // 载入后 save() 可能合法发生,先清 loadError(这是一个"成功操作")
   state.loadError = null
 
@@ -191,6 +204,7 @@ export function importSource(data) {
   wrapAllInstances()
   spreadUnpositioned()
   fitToView()
+  return true
 }
 
 export function onNew() {

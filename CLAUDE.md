@@ -111,6 +111,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 - **演化层数据不序列化(ADR-005)**——traces/探测边等"运行时事实"不入 sourceCode、不入 URL hash;它们是易失观测层,`runSource`/`resetRuntime` 即清空。sourceCode 只承载作者意图(声明结构+声明边+方法体),观察值不回写。
 - **引用值 attr 序列化为 varName(ADR-006)**——`formatValue` 对带 `__instId` 的对象输出目标 varName,容器内任意深度递归保持引用身份;环/超深(>8)降级 `null`。**不允许**退回 JSON 化副本(会让引用静默变拷贝、探测边跨 session 消失)。
 - **序列化源是作者态快照(ADR-007)**——`serializeCode` 只写 `state.authorAttrs`(runSource 捕获、UI 编辑写穿);方法体/transform/stepAll 的演化值不进 sourceCode,reset 恢复作者态。新增改 attrs 的 UI 入口必须同步写穿(`src/author.js`)。
+- **外部导入的 sourceCode 必须先过 `classifySource`(ADR-008)**——declarative 免确认,programmatic/unknown 弹阻断式 confirm;闸门唯一咽喉是 `importSource`(返回布尔,取消不载入),localStorage 载入不过闸。dist 必须携带 meta CSP(`connect-src 'none'`),不得引入运行时网络请求。
 
 ## Documentation
 

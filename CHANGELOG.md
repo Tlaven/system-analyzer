@@ -6,6 +6,7 @@
 
 ### Added
 
+- **外部导入执行闸门(ADR-008)**:`classifySource` 三值分类(声明式/程序化/未知)+ `importSource` 阻断式确认(取消不载入、URL 回退本地图)+ meta CSP(`connect-src 'none'` 锁 exfil 出口);测试:分类器 18 项 + e2e 4 例 + storm "序列化产物必为 declarative"不变量
 - **执行观测 MVP(ADR-005,roadmap A1–A3)**:
   - **A1 属性时序记录**——`state.traces[varName][attr] = {tick, value}[]`,环形缓冲 200,`stepAll` 每 tick 写入(只记数值型 own attrs);panel 数值属性行内嵌 mini sparkline,连播时原地重绘不重建 panel
   - **A2 步进连播**——执行模式 `step` 下新增 `▶ 连播/⏸ 暂停` + 速度三档(慢 1s / 中 0.5s / 快 0.15s,`config.playSpeed` 持久化),`setInterval(stepAll)` 驱动;换图(`runtimeGen` 变)/切模式自动停

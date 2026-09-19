@@ -32,6 +32,7 @@
 //  23. 多边支持（同源多目标）
 import puppeteer from 'puppeteer'
 import { resolve } from 'path'
+import { toB64 } from '../src/utils.js'
 
 const root = resolve(process.cwd())
 
@@ -88,9 +89,11 @@ const page = await browser.newPage()
 page.on('console', msg => console.log('  [browser console]', msg.text()))
 page.on('pageerror', err => console.log('  [browser error]', err.message))
 const dialogMsgs = []
+let dialogMode = 'accept'
 page.on('dialog', async d => {
   dialogMsgs.push(d.message())
-  await d.accept()
+  if (dialogMode === 'dismiss') await d.dismiss()
+  else await d.accept()
 })
 
 await page.goto('file://' + resolve(root, 'dist', 'index.html'))
@@ -1301,6 +1304,66 @@ S_1.edges = [{ target: T_1, transform: "target['v'] = source['v'] + 1" }]`
     t: window.state.runtimeInstances.find(i => i.varName === 'T_1').attrs.v,
   }))
   check('reset 后 T_1.v 回作者态 0 / S_1.v 保留 10', after.s === 10 && after.t === 0, after)
+}
+
+const GATE_SAMPLE = `class Counter {
+  description = '计数器'
+  attrs = { n: 0 }
+  tick() { this.n = this.n + 1 }
+}
+const Counter_1 = GraphStarter.add(Counter, 'Counter_1')`
+
+console.log('\n测试 45：ADR-008 声明式导入零弹窗')
+{
+  dialogMsgs.length = 0
+  const ok = await page.evaluate((src) => window.__sa_test.importJSON({ sourceCode: src, title: '闸门声明式' }), V09_SAMPLE)
+  await new Promise(r => setTimeout(r, 150))
+  check('声明式导入成功(返回 true)', ok === true, ok)
+  check('声明式导入零 confirm', dialogMsgs.length === 0, dialogMsgs)
+}
+
+console.log('\n测试 46：ADR-008 程序化导入取消不载入')
+{
+  const before = await page.evaluate(() => window.state.sourceCode)
+  dialogMsgs.length = 0
+  dialogMode = 'dismiss'
+  const ok = await page.evaluate((src) => window.__sa_test.importJSON({ sourceCode: src, title: '闸门程序化' }), GATE_SAMPLE)
+  dialogMode = 'accept'
+  const after = await page.evaluate(() => window.state.sourceCode)
+  check('程序化导入返回 false(取消)', ok === false, ok)
+  check('取消后 sourceCode 未变', after === before, { changed: after !== before })
+  check('闸门 confirm 文案命中', dialogMsgs.some(m => m.includes('可执行代码')), dialogMsgs)
+}
+
+console.log('\n测试 47：ADR-008 meta CSP(出口锁定)')
+{
+  const csp = await page.evaluate(async () => {
+    const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]')
+    const violations = []
+    document.addEventListener('securitypolicyviolation', e => violations.push(e.violatedDirective))
+    try { await fetch('https://example.com/') } catch (_) {}
+    await new Promise(r => setTimeout(r, 100))
+    return { hasMeta: !!meta, content: meta ? meta.content : '', violations }
+  })
+  check('meta CSP 存在', csp.hasMeta, csp)
+  check("CSP 含 connect-src 'none'", /connect-src\s+'none'/.test(csp.content), csp.content)
+  check('fetch 触发 connect-src 违规', csp.violations.some(v => v.startsWith('connect-src')), csp.violations)
+}
+
+console.log('\n测试 48：ADR-008 分享链接取消载入 → 回退本地图')
+{
+  dialogMsgs.length = 0
+  dialogMode = 'dismiss'
+  const payload = toB64(JSON.stringify({ version: 6, sourceCode: GATE_SAMPLE, editMode: 'code', title: '闸门URL测试' }))
+  await page.goto('about:blank')
+  await page.goto('file://' + resolve(root, 'dist', 'index.html') + '#' + payload)
+  await page.waitForFunction(() => window.state)
+  await new Promise(r => setTimeout(r, 150))
+  const s = await page.evaluate(() => ({ src: window.state.sourceCode, title: window.state.graphTitle }))
+  dialogMode = 'accept'
+  check('dismiss 后未载入 hash 图', !s.src.includes('tick()'), s.src.slice(0, 80))
+  check('回退本地已存图(标题非 闸门URL测试)', s.title !== '闸门URL测试', s.title)
+  check('闸门 confirm 出现', dialogMsgs.some(m => m.includes('可执行代码')), dialogMsgs)
 }
 
 await browser.close()
