@@ -249,29 +249,35 @@ minimal 模式下，边可能被路径上的其他圆形节点遮挡。这是**�
 
 ---
 
-## 10. 显示通道扩展计划（planned，2026-09-14）
+## 10. 显示通道扩展（已实现，2026-09-15）
 
-> 方向型记录（状态流转约定见 CLAUDE.md 演化期规则）。准入判据三条：画面上的事实须回答 (1) 这张图在做什么 2_FN56 ) 下一步谁动了什么 (3) 现在坏不坏/为什么。回答不了的进 tooltip/panel。
+> 方向型记录（状态流转约定见 CLAUDE.md 演化期规则）。准入判据三条：画面上的事实须回答 (1) 这张图在做什么 (2) 下一步谁动了什么 (3) 现在坏不坏/为什么。回答不了的进 tooltip/panel。
 
 ### 新增（按优先级）
 
 | # | 通道 | 判据（数据现成） | 档位 | 状态 |
 |---|---|---|---|---|
-| 1 | transform 活性标记（箭头变形 / ƒ 角标） | `edge.transform` 非空 | **三档全含（含 minimal）**——AI 链接打开默认就是 minimal 档 | planned |
-| 2 | 方法体存在圆点 | `cls.methods.length > 0` | 三档通用小角标 | planned |
-| 3 | 边 description 标签（中段截断文字） | `edge.description` | 仅 medium/full，minimal 保持鸟瞰 | planned |
-| 4 | override 浅标记（属性行值淡下划线） | `key in inst.attrs` 且非 `key in cls.attrs` | medium/full 属性行 | planned |
-| 5 | 执行脉冲（0.5s 波扫） | propagate/stepAll 触发 | 全档 | planned（可后置） |
+| 1 | transform 活性标记（ƒ 角标） | `edge.transform` 非空（deriveEdges 已携带） | **三档全含（含 minimal）**——AI 链接打开默认就是 minimal 档 | 已实现 |
+| 2 | 方法体存在圆点 | `cls.methods.length > 0` | 三档通用小角标 | 已实现 |
+| 3 | 边 description 标签（中段截断文字） | `edge.description` | 仅 medium/full，minimal 保持鸟瞰 | 已实现 |
+| 4 | override 浅标记（属性行值淡下划线） | 值与 class 默认不等（与 serializeCode 的 `_equal` 判据一致；本行 2026-09-15 修正——原写"`key in inst.attrs` 且非 `key in cls.attrs`"，但 makeBridge 会拷贝 class attrs 到实例，key 存在性无法区分 override） | medium/full 属性行 | 已实现 |
+| 5 | 执行脉冲（0.5s 波扫） | `sa-tick` / `sa-propagate` 事件触发（engine 只发事件，input 驱动 rAF，renderer 读 `state.pulse` 并过期清除） | 全档 | 已实现 |
 
 ### 去掉（假 affordance 清除）
 
 | # | 项 | 理由 | 状态 |
 |---|---|---|---|
-| A | Code 模式下的拖柄 | 拖柄始终绘制（renderer 无 editMode 检查），但 Code 模式拖边建边被禁（`createEdgeFromDrag` early-return）——显示层撒谎。Code 模式选中只留选中环 | planned |
-| B | Code 模式下"双击空白新建"空 hint | 同上，指向被禁交互 | planned |
+| A | Code 模式下的拖柄 | 拖柄始终绘制（renderer 无 editMode 检查），但 Code 模式拖边建边被禁（`createEdgeFromDrag` early-return）——显示层撒谎。Code 模式选中只留选中环 | 已实现（`isSel && editMode==='ui'`；切 Code 时补 render 立即生效） |
+| B | Code 模式下"双击空白新建"空 hint | 同上，指向被禁交互 | 已实现（Code 模式空画布提示改为"在左侧代码面板写 sourceCode"） |
+
+### 实现说明（2026-09-15）
+
+- ƒ 角标画在边路径中点（圆底 + 斜体 ƒ），描述标签在中点上方 16px（不打架）；提取 `pointOnPath(t)` 供粒子动画/脉冲/角标共用
+- 脉冲语义：`stepAll` 发 `sa-tick`（vars = 本 tick 执行集合），`propagate` 发 `sa-propagate`（vars = 从起点起的下游集合），二者都触发；边波点要求两端都在集合内，节点画扩散环
+- 通道 4 画在 medium/full 节点属性行值下方（淡 accent 下划线），minimal 无属性行天然不做
 
 ### 明确不做
 
 AI diff 视图 / class 图例面板 / weight 流量粗细（模型语义未定） / 坐标数字 / 执行历史 timeline（时序哲学未定）。
 
-设计前提：全部新通道**不扩模型**——从现有 runtime 对象（edge.transform / edge.description / inst.attrs / cls.methods / state.editMode）直接可读；净效应 = 5 新通道 + 2 假 affordance 清除。
+设计前提（已兑现）：全部新通道**不扩模型**——从现有 runtime 对象（edge.transform / edge.description / inst.attrs / cls.methods / state.editMode）直接可读；净效应 = 5 新通道 + 2 假 affordance 清除。

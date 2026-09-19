@@ -191,6 +191,7 @@ export function propagate(startVarName) {
   const startIdx = startVarName ? order.indexOf(startVarName) : -1
   const toProcess = startIdx >= 0 ? order.slice(startIdx) : order
 
+  const ran = []
   for (const vName of toProcess) {
     const inst = state.runtimeInstances.find(i => i.varName === vName)
     if (!inst || inst._topoError) continue
@@ -200,13 +201,19 @@ export function propagate(startVarName) {
       if (methodName === 'tick') continue
       callInstMethod(inst, methodName, { dt: 1 })
     }
+    ran.push(vName)
   }
   evalTransforms()
+  // 显示通道 5:通知 UI 触发执行脉冲(vars = 实际执行集合)。engine 保持 DOM-free,仅事件。
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sa-propagate', { detail: { vars: ran } }))
+  }
 }
 
 // 一步时间演化：每个实例先调用所有非 tick 方法，再调用 tick
 export function stepAll() {
   const order = topologicalSort()
+  const ran = []
   for (const vName of order) {
     const inst = state.runtimeInstances.find(i => i.varName === vName)
     if (!inst || inst._topoError) continue
@@ -219,12 +226,13 @@ export function stepAll() {
     if (cls.hasTick) {
       callInstMethod(inst, 'tick', { dt: 1 })
     }
+    ran.push(vName)
   }
 
   state.tickCount++
   recordTraces()
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('sa-tick', { detail: { tickCount: state.tickCount } }))
+    window.dispatchEvent(new CustomEvent('sa-tick', { detail: { tickCount: state.tickCount, vars: ran } }))
   }
 }
 

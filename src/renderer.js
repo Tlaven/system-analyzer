@@ -1,6 +1,6 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, NODE_RADIUS, PORT_R, ARROW_SZ, getPaletteColors } from './state.js'
 import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, formatScalar } from './utils.js'
-import { deriveEdges, nodeIndex } from './codegraph.js'
+import { deriveEdges, nodeIndex, _equal } from './codegraph.js'
 import { getCycleMembers } from './engine.js'
 
 export function drawGrid() {
@@ -117,6 +117,16 @@ export function render() {
   const _byId = nodeIndex(state)
   const _cycleMembers = getCycleMembers()
 
+  // 显示通道 5:执行脉冲(propagate/stepAll 触发,0.5s 波扫)。render 每帧推进;
+  // 过期在这里清除(驱动循环见 input.js triggerPulse)。vars 为本次实际执行的实例集合,null = 全体。
+  const PULSE_MS = 500
+  let _pulseP = -1
+  if (state.pulse) {
+    _pulseP = (performance.now() - state.pulse.start) / PULSE_MS
+    if (_pulseP >= 1) { state.pulse = null; _pulseP = -1 }
+  }
+  const _pulseHit = (v) => _pulseP >= 0 && (!state.pulse.vars || state.pulse.vars.has(v))
+
   for (const e of _allEdges) {
     const s = _byId.get(e.source_node), t = _byId.get(e.target_node)
     if (!s || !t) continue
@@ -201,6 +211,30 @@ export function render() {
         ctx.moveTo(P1.x, P1.y); ctx.lineTo(P2.x, P2.y)
       }
     }
+    // 路径参数 t∈[0,1] 取点(脉冲/粒子动画共用)
+    const pointOnPath = (t) => {
+      if (route) {
+        let total = 0
+        const lens = []
+        for (let i = 1; i < route.length; i++) {
+          const l = Math.hypot(route[i].x - route[i-1].x, route[i].y - route[i-1].y)
+          lens.push(l); total += l
+        }
+        let acc = t * total
+        let i = 0
+        while (i < lens.length - 1 && acc > lens[i]) { acc -= lens[i]; i++ }
+        const f = lens[i] ? acc / lens[i] : 0
+        return { x: route[i].x + (route[i+1].x - route[i].x) * f, y: route[i].y + (route[i+1].y - route[i].y) * f }
+      }
+      if (isCurve && curveCubic) {
+        const u = 1 - t
+        return {
+          x: u*u*u*P1.x + 3*u*u*t*curveCubic.cp1.x + 3*u*t*t*curveCubic.cp2.x + t*t*t*P2.x,
+          y: u*u*u*P1.y + 3*u*u*t*curveCubic.cp1.y + 3*u*t*t*curveCubic.cp2.y + t*t*t*P2.y,
+        }
+      }
+      return { x: P1.x + (P2.x - P1.x) * t, y: P1.y + (P2.y - P1.y) * t }
+    }
     drawEdgePath(); ctx.stroke()
 
     if (isCycleEdge) {
@@ -210,6 +244,32 @@ export function render() {
       ctx.setLineDash([6, 4])
       drawEdgePath(); ctx.stroke()
       ctx.restore()
+    }
+
+    // 显示通道 1:transform 活性 ƒ 角标(三档全含;数据 = edge.transform 非空)
+    if (e.transform) {
+      const mid = pointOnPath(0.5)
+      ctx.beginPath(); ctx.arc(mid.x, mid.y, 7, 0, Math.PI * 2)
+      ctx.fillStyle = pc.nodeBg; ctx.fill()
+      ctx.strokeStyle = pc.accent; ctx.lineWidth = 1.2; ctx.stroke()
+      ctx.font = 'italic bold 10px Georgia,serif'
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillStyle = pc.accent
+      ctx.fillText('ƒ', mid.x, mid.y + 0.5)
+    }
+
+    // 显示通道 3:边 description 标签(仅 medium/full,minimal 保持鸟瞰)
+    if (config.infoLevel !== 'minimal' && e.description) {
+      const mid = pointOnPath(0.5)
+      ctx.font = '10px "Microsoft YaHei",sans-serif'
+      const label = truncateText(ctx, e.description, 120)
+      const tw = ctx.measureText(label).width
+      const ly = mid.y - 16
+      ctx.fillStyle = pc.bg
+      ctx.fillRect(mid.x - tw / 2 - 3, ly - 8, tw + 6, 13)
+      ctx.fillStyle = pc.text3
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText(label, mid.x, ly - 1)
     }
 
     // 箭头方向：polyline 用 route 末段切线；curve 用 cp2→P2 切线；straight 用基线方向
@@ -228,29 +288,8 @@ export function render() {
       } else {
         // particleFlow:沿路径参数 t 取点
         const t = ((state.physTime * 0.05) % 1 + 1) % 1
-        let px, py
-        if (route) {
-          // 折线分段插值
-          let total = 0
-          const lens = []
-          for (let i = 1; i < route.length; i++) {
-            const l = Math.hypot(route[i].x - route[i-1].x, route[i].y - route[i-1].y)
-            lens.push(l); total += l
-          }
-          let acc = t * total
-          let i = 0
-          while (i < lens.length - 1 && acc > lens[i]) { acc -= lens[i]; i++ }
-          const f = lens[i] ? acc / lens[i] : 0
-          px = route[i].x + (route[i+1].x - route[i].x) * f
-          py = route[i].y + (route[i+1].y - route[i].y) * f
-        } else if (isCurve && curveCubic) {
-          const u = 1 - t
-          px = u*u*u*P1.x + 3*u*u*t*curveCubic.cp1.x + 3*u*t*t*curveCubic.cp2.x + t*t*t*P2.x
-          py = u*u*u*P1.y + 3*u*u*t*curveCubic.cp1.y + 3*u*t*t*curveCubic.cp2.y + t*t*t*P2.y
-        } else {
-          px = p1.x + (p2.x - p1.x) * t; py = p1.y + (p2.y - p1.y) * t
-        }
-        ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fillStyle = ec; ctx.fill()
+        const pt = pointOnPath(t)
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2); ctx.fillStyle = ec; ctx.fill()
       }
       ctx.restore()
     }
@@ -259,6 +298,19 @@ export function render() {
     ctx.lineTo(p2.x - ARROW_SZ * Math.cos(ang - Math.PI / 6), p2.y - ARROW_SZ * Math.sin(ang - Math.PI / 6))
     ctx.lineTo(p2.x - ARROW_SZ * Math.cos(ang + Math.PI / 6), p2.y - ARROW_SZ * Math.sin(ang + Math.PI / 6))
     ctx.closePath(); ctx.fill()
+
+    // 显示通道 5:脉冲波点沿受影响边扫过(两端都在本次执行集合内)
+    if (_pulseHit(e.source_instance) && _pulseHit(e.target_instance)) {
+      ctx.save()
+      const head = pointOnPath(_pulseP)
+      const tail = pointOnPath(Math.max(0, _pulseP - 0.08))
+      ctx.fillStyle = pc.accent
+      ctx.globalAlpha = (1 - _pulseP) * 0.45
+      ctx.beginPath(); ctx.arc(tail.x, tail.y, 2.5, 0, Math.PI * 2); ctx.fill()
+      ctx.globalAlpha = (1 - _pulseP) * 0.9
+      ctx.beginPath(); ctx.arc(head.x, head.y, 3.5, 0, Math.PI * 2); ctx.fill()
+      ctx.restore()
+    }
 
     ctx.globalAlpha = 1
   }
@@ -320,6 +372,17 @@ export function render() {
     ctx.lineWidth = isSel ? 2 : (isHov || isNbr || isSearchMatch) ? 2 : 1.2
     ctx.stroke()
 
+    // 显示通道 2:方法体存在圆点(三档通用角标;数据 = cls.methods.length > 0)
+    const ncls = state.classes[n.className]
+    if (ncls && ncls.methods && ncls.methods.length > 0) {
+      const rad = Math.max(r.w, r.h) / 2
+      const dx = isCircle ? n.x + rad * 0.71 : r.x + r.w - 7
+      const dy = isCircle ? n.y - rad * 0.71 : r.y + 7
+      ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI * 2)
+      ctx.fillStyle = pc.accent; ctx.fill()
+      ctx.strokeStyle = pc.nodeBg; ctx.lineWidth = 1.5; ctx.stroke()
+    }
+
     const contL = r.x + 8, contR = r.x + r.w - 8, contW = contR - contL
 
     if (isCircle) {
@@ -356,12 +419,26 @@ export function render() {
       if (shown.length) {
         ctx.font = '11px "Microsoft YaHei",sans-serif'
         const halfW = Math.max(20, contW / 2 - 4)
+        const clsAttrs = (state.classes[n.className] && state.classes[n.className].attrs) || {}
         for (const k of shown) {
           const v = formatScalar(n.properties[k])
           ctx.fillStyle = sc; ctx.textAlign = 'left'
           ctx.fillText(truncateText(ctx, k, halfW), contL, iy)
           ctx.fillStyle = tc; ctx.textAlign = 'right'
-          ctx.fillText(truncateText(ctx, v, halfW), contR, iy)
+          const vTxt = truncateText(ctx, v, halfW)
+          ctx.fillText(vTxt, contR, iy)
+          // 显示通道 4:实例 override 浅下划线(值与 class 默认不等,与 serializeCode 判据一致)
+          if (k in n.attrs && !(k in clsAttrs && _equal(n.attrs[k], clsAttrs[k]))) {
+            const vw = ctx.measureText(vTxt).width
+            ctx.save()
+            ctx.globalAlpha = ctx.globalAlpha * 0.4
+            ctx.strokeStyle = pc.accent
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            ctx.moveTo(contR - vw, iy + 12.5); ctx.lineTo(contR, iy + 12.5)
+            ctx.stroke()
+            ctx.restore()
+          }
           iy += 17
         }
         if (pk.length > maxRows) {
@@ -393,8 +470,8 @@ export function render() {
       ctx.restore()
     }
     // v0.9：选中节点画 4 个拖柄圆点（上右下左中点）— 拖出边的入口
-    // 圆形 / 矩形都画；不再依赖 inputs/outputs（v0.9 无端口概念）
-    if (isSel) {
+    // 假 affordance 清除 A：仅 UI 模式画（Code 模式 createEdgeFromDrag 被禁，画了就是撒谎）
+    if (isSel && state.editMode === 'ui') {
       const handles = getHandlePoints(n)
       for (const h of handles) {
         ctx.beginPath(); ctx.arc(h.x, h.y, PORT_R, 0, Math.PI * 2)
@@ -402,12 +479,30 @@ export function render() {
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke()
       }
     }
+    // 显示通道 5:脉冲波环(本次执行集合内的节点)
+    if (_pulseHit(n.varName)) {
+      const grow = 4 + _pulseP * 16
+      ctx.save()
+      ctx.globalAlpha = (1 - _pulseP) * 0.55
+      ctx.strokeStyle = pc.accent
+      ctx.lineWidth = 2
+      if (isCircle) {
+        ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(r.w, r.h) / 2 + grow, 0, Math.PI * 2)
+      } else {
+        ctx.beginPath(); ctx.roundRect(r.x - grow, r.y - grow, r.w + grow * 2, r.h + grow * 2, NODE_RADIUS + grow)
+      }
+      ctx.stroke()
+      ctx.restore()
+    }
     ctx.globalAlpha = 1
   }
 
   const emptyHint = document.getElementById('empty-hint')
   if (state.nodes.length === 0) {
-    emptyHint.innerHTML = '空画布<br><span style="font-size:13px;opacity:.85">点击 <kbd>+</kbd> 加节点 / 双击空白新建<br>或切到 <kbd>代码</kbd> 模式写 sourceCode</span>'
+    // 假 affordance 清除 B：Code 模式不提示"+/双击新建"（这些入口在 Code 模式被禁）
+    emptyHint.innerHTML = state.editMode === 'code'
+      ? '空画布<br><span style="font-size:13px;opacity:.85">在左侧代码面板写 sourceCode</span>'
+      : '空画布<br><span style="font-size:13px;opacity:.85">点击 <kbd>+</kbd> 加节点 / 双击空白新建<br>或切到 <kbd>代码</kbd> 模式写 sourceCode</span>'
     emptyHint.style.display = 'block'
   } else if (state.selInstance && state.editMode === 'ui') {
     emptyHint.innerHTML = '<span style="font-size:13px;opacity:.85">拖节点边缘圆点 → 落到目标节点 = 建边</span>'

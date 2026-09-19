@@ -17,7 +17,7 @@
 | **运行时层** | `src/io.js` | `wrapInstance` 加 getter、state 别名 |
 | **执行引擎** | `src/engine.js` | `topologicalSort` / `propagate` / `stepAll`(方法体调度,Code 模式方法体才生效)+ `evalTransforms` / `runTransforms`(边级 transform 表达式,ADR-003,跨模式生效)+ `getCycleMembers`(Tarjan SCC,ADR-005 A3)。v0.13 pure 化:无 DOM/render 依赖,`stepAll` 通过 `dispatchEvent('sa-tick')` 通知 UI;`stepAll` 末尾写 `state.traces`(A1)。**可 Node 单测**(`scripts/test-engine.mjs`) |
 | **持久化** | `src/main.js` 内 `load`/`save` | `sa_data` 存 `{version, sourceCode, visualState, ...}`,URL hash 分享 base64 |
-| **渲染** | `src/renderer.js` | Canvas 2D,按 `infoLevel` 三档渲染节点 + 边布线 |
+| **渲染** | `src/renderer.js` | Canvas 2D,按 `infoLevel` 三档渲染节点 + 边布线 + 显示通道(ƒ 角标/方法体圆点/description/override 下划线/执行脉冲,详见 `visualization-modes.md` §10) |
 | **路由** | `src/utils.js` (`edgePts` 等) | 边端点 + 控制点几何计算 |
 | **布局** | `src/physics.js` | manual/force/circular/hierarchical 四种自动布局 |
 | **panel** | `src/panel.js` | 类型/实例 segmented control + 节点 panel(属性/边编辑)+ 独立边 panel(ADR-003 OQ#1,transform 编辑入口) |
@@ -216,7 +216,7 @@ Code 模式交互:
 
 **执行引擎** (`src/engine.js`). 三层入口:(1) `topologicalSort()` 基于 `deriveEdges()` 排序实例;(2) `propagate(startVarName)` / `stepAll()` 按拓扑序调用方法体(UI 模式 class 无方法体 → 方法调用是 no-op,等 Code 模式 AI 实现方法体后才有效果);(3) `evalTransforms()` / `runTransforms()` 跑边级 transform 表达式(ADR-003,**跨模式生效**——transform 是 attrs 模型的一部分,不是方法体)。`evalTransforms` 不走 topo 序也不跳过环:声明式公式各跑一次不会无限循环,按 `runtimeInstances` 定义顺序跑(source 通常先于 target)。`propagate()` 内部末尾也调一次 `evalTransforms()`,所以 auto 模式重算方法体后会顺带跑 transform。
 
-**执行观测(ADR-005 MVP)**. `stepAll()` 每 tick 末尾把数值型 own attrs 写入 `state.traces`(环形缓冲 200),panel 数值属性行渲染 mini sparkline,连播时 input.js 的 `sa-tick` 监听原地重绘。连播控件(▶/⏸ + 速度三档)在 `input.js`:`setInterval(stepAll)` 驱动,`state.runtimeGen`(runSource 递增)守卫换图即停。环边标记:`getCycleMembers()` 用 Tarjan SCC 区分真环成员与 Kahn 剩余的下游节点,renderer 对两端均为环成员的边叠加红色虚线。propagate 是"同一时刻的因果重算"(不动时钟),trace 的 tick 只由 stepAll 推进。
+**执行观测(ADR-005 MVP)**. `stepAll()` 每 tick 末尾把数值型 own attrs 写入 `state.traces`(环形缓冲 200),panel 数值属性行渲染 mini sparkline,连播时 input.js 的 `sa-tick` 监听原地重绘。连播控件(▶/⏸ + 速度三档)在 `input.js`:`setInterval(stepAll)` 驱动,`state.runtimeGen`(runSource 递增)守卫换图即停。环边标记:`getCycleMembers()` 用 Tarjan SCC 区分真环成员与 Kahn 剩余的下游节点,renderer 对两端均为环成员的边叠加红色虚线。propagate 是"同一时刻的因果重算"(不动时钟),trace 的 tick 只由 stepAll 推进。**执行脉冲**(显示通道 5):engine 只发事件(stepAll → `sa-tick`、propagate → `sa-propagate`,detail.vars = 实际执行集合),input.js `triggerPulse` 驱动 0.5s rAF,renderer 读 `state.pulse` 画边波点 + 节点扩散环,过期由 render 清除。
 
 **持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。**载入失败保护**:`load()` 反序列化成功但 `runSource` 失败时置 `state.loadError`,`save()` 拒绝覆盖 `sa_data`(防止空画布的下一次编辑抹掉用户图);`loadError` 由成功操作清除(onNew / importSource / codeview commitCode 成功)。**载入守卫**:importSource 校验 version(≠6 拒绝)、尊重数据里的 editMode、UI 模式 + 程序化 sourceCode 时 confirm 推荐切 Code 模式载入。
 

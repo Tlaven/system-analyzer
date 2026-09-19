@@ -2,7 +2,7 @@
 // 引擎 v0.13 起 pure（无 DOM/render 依赖）；state.js polyfill 有 Node guard。
 // 运行：node scripts/test-engine.mjs（直接 import src，无需 build）
 import { state } from '../src/state.js'
-import { runSource } from '../src/codegraph.js'
+import { runSource, deriveEdges } from '../src/codegraph.js'
 import { stepAll, getCycleMembers, topologicalSort } from '../src/engine.js'
 
 let pass = 0, fail = 0
@@ -86,12 +86,15 @@ class B { attrs = { v: 0 } }
 
 const A_1 = GraphStarter.add(A)
 const B_1 = GraphStarter.add(B)
-A_1.edges = [{ target: B_1 }]`
+A_1.edges = [{ target: B_1, description: '带公式', transform: "target['v'] = source['v']" }]`
 
-console.log('\n测试 5：无环图环成员为空')
+console.log('\n测试 5：无环图环成员为空 + 派生边携带 transform/description（显示通道数据面）')
 {
   runSource(ACYCLIC_SAMPLE, state)
   check('无环 = 空集', getCycleMembers().size === 0, Array.from(getCycleMembers()))
+  const ed = deriveEdges(state)[0]
+  check('派生边携带 transform', ed && ed.transform === "target['v'] = source['v']", ed)
+  check('派生边携带 description', ed && ed.description === '带公式', ed)
 }
 
 const SELF_LOOP_SAMPLE = `class S { attrs = { v: 0 } }

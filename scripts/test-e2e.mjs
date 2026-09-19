@@ -1130,6 +1130,72 @@ B_1.edges = [{ target: A_1 }, { target: C_1 }]`
   check('3 条边派生 + 渲染无异常', r.edges === 3, r.edges)
 }
 
+console.log('\n测试 40：显示通道数据面(transform / 方法体 / description)')
+{
+  const CHANNEL_SAMPLE = `class A {
+  description = '源'
+  attrs = { v: 0 }
+  tick() { this.v = this.v + 1 }
+}
+class B {
+  description = '目标'
+  attrs = { w: 0 }
+}
+const A_1 = GraphStarter.add(A)
+const B_1 = GraphStarter.add(B)
+A_1.edges = [{ target: B_1, description: '带公式的边', transform: "target['w'] = source['v'] * 2" }]`
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: '通道测试' })
+  }, CHANNEL_SAMPLE)
+  const r = await page.evaluate(() => {
+    const ed = window.deriveEdges()[0]
+    const clsA = window.state.classes.A
+    const clsB = window.state.classes.B
+    return {
+      transform: ed && ed.transform,
+      desc: ed && ed.description,
+      aMethods: clsA ? clsA.methods.length : -1,
+      bMethods: clsB ? clsB.methods.length : -1,
+    }
+  })
+  check('派生边携带 transform(通道 1 判据)', r.transform === "target['w'] = source['v'] * 2", r)
+  check('派生边携带 description(通道 3 判据)', r.desc === '带公式的边', r)
+  check('A 有方法体 / B 无(通道 2 判据)', r.aMethods === 1 && r.bMethods === 0, r)
+}
+
+console.log('\n测试 41：显示通道 5 执行脉冲(sa-tick / sa-propagate 触发 + 过期)')
+{
+  await page.evaluate(() => window.stepOnce())
+  const p1 = await page.evaluate(() => !!window.state.pulse)
+  check('stepAll 触发 pulse', p1 === true)
+
+  let expired = true
+  try {
+    await page.waitForFunction(() => window.state.pulse === null, { timeout: 2500 })
+  } catch (e) { expired = false }
+  check('0.5s 后 pulse 过期清除', expired === true)
+
+  await page.evaluate(() => window.propagate('A_1'))
+  const p3 = await page.evaluate(() => {
+    const p = window.state.pulse
+    return p ? { vars: p.vars ? Array.from(p.vars) : null } : null
+  })
+  check('propagate 触发 pulse(vars = 执行集合)', !!p3 && Array.isArray(p3.vars) && p3.vars.includes('A_1'), p3)
+}
+
+console.log('\n测试 42：假 affordance 清除(Code 模式空画布提示)')
+{
+  await page.evaluate(() => {
+    window.__sa_test.importJSON({ sourceCode: '', title: '空图' })
+  })
+  await page.evaluate(() => window.setEditMode('code'))
+  const codeHint = await page.evaluate(() => document.getElementById('empty-hint').innerHTML)
+  check('Code 模式提示不含 +/双击', !codeHint.includes('双击') && !codeHint.includes('kbd'), codeHint)
+  await page.evaluate(() => window.setEditMode('ui'))
+  const uiHint = await page.evaluate(() => document.getElementById('empty-hint').innerHTML)
+  check('UI 模式恢复 +/双击提示', uiHint.includes('双击'), uiHint)
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

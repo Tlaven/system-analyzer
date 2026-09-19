@@ -10,8 +10,17 @@
   - **A1 属性时序记录**——`state.traces[varName][attr] = {tick, value}[]`,环形缓冲 200,`stepAll` 每 tick 写入(只记数值型 own attrs);panel 数值属性行内嵌 mini sparkline,连播时原地重绘不重建 panel
   - **A2 步进连播**——执行模式 `step` 下新增 `▶ 连播/⏸ 暂停` + 速度三档(慢 1s / 中 0.5s / 快 0.15s,`config.playSpeed` 持久化),`setInterval(stepAll)` 驱动;换图(`runtimeGen` 变)/切模式自动停
   - **A3 环边标记**——Tarjan SCC 识别真环成员(与 Kahn 剩余"环内+下游"区分),两端均为环成员的边在画布红色虚线覆盖(直/曲/折线同路径)
-- `scripts/test-engine.mjs`——引擎 Node 单测 17 项(traces 写入/环形缓冲 200/runSource 清空/环成员识别:环、无环、自环)
+- `scripts/test-engine.mjs`——引擎 Node 单测(现 19 项):traces 写入/环形缓冲/runSource 清空/环成员识别/派生边 transform+description 字段
 - e2e 测试 36–39:连播/暂停/换图停播/时序记录 + sparkline/环成员识别
+- **显示通道批次(visualization-modes.md §10,5 通道 + 2 假 affordance 清除)**:
+  - 通道 1:transform 活性 ƒ 角标(边路径中点,三档全含;`deriveEdges` 增派 `transform` 字段)
+  - 通道 2:方法体存在圆点(节点角标,`cls.methods.length > 0`)
+  - 通道 3:边 description 标签(中点上方,仅 medium/full,minimal 保持鸟瞰)
+  - 通道 4:override 浅下划线(medium/full 属性行值;判据修正为"值与 class 默认不等",与 serializeCode 的 `_equal` 一致——原文档写 key 存在性,但 makeBridge 会把 class attrs 拷贝进实例,该判据无效)
+  - 通道 5:执行脉冲 0.5s 波扫(engine 发 `sa-tick`/`sa-propagate` 事件 + `state.pulse`,input 驱动 rAF,renderer 画边波点 + 节点扩散环;提取 `pointOnPath(t)` 与粒子动画共用)
+  - 假 affordance A:Code 模式不再画拖柄,且切换 Code 时补 render 立即生效
+  - 假 affordance B:Code 模式空画布提示不再指向"+/双击新建"
+- e2e 测试 40–42:显示通道数据面 / 执行脉冲触发与过期 / Code 模式假 affordance 清除;`test-engine.mjs` 补派生边 transform 字段断言
 
 ### Changed
 

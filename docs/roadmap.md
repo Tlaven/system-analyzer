@@ -38,14 +38,6 @@
 
 ---
 
-## C. 显示通道扩展计划 — planned(详见 `docs/visualization-modes.md` §10)
-
-5 新通道(transform 活性/方法体圆点/边 description/override 标记/执行脉冲)+ 2 假 affordance 清除。
-
-注意**与 A 的耦合已解除**:通道 5"执行脉冲"的触发者(A2 连播)已就绪,可随批做;通道 1(transform 活性标记)与已于本轮实现的 A3 环边标记同区(边装饰),排期时放一起评估。
-
----
-
 ## Dropped / 已移出
 
 (空——done 的条目在完成后从本文件移除,历史在 git)

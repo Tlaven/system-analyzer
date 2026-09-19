@@ -77,6 +77,7 @@ export function deriveEdges(state) {
         label: '',
         relation: '',
         description: e.description != null ? String(e.description) : '',
+        transform: typeof e.transform === 'string' ? e.transform : '',
         weight: 1,
         metadata: {},
       })

@@ -79,6 +79,21 @@ function startPlay() {
 }
 window.togglePlay = () => { state.playing ? stopPlay() : startPlay() }
 window.stopPlay = stopPlay
+
+// ============ 显示通道 5:执行脉冲驱动(0.5s 波扫) ============
+// engine 只发事件(stepAll → sa-tick, propagate → sa-propagate);这里设置 state.pulse
+// 并驱动帧循环,renderer 读 pulse 画波扫并在 0.5s 后清除。与 physics/edgeAnim 的 rAF 循环并行无害。
+let _pulseRAF = null
+function triggerPulse(vars) {
+  state.pulse = { start: performance.now(), vars: (vars && vars.length) ? new Set(vars) : null }
+  if (_pulseRAF) return
+  const step = () => {
+    render()
+    if (state.pulse) _pulseRAF = requestAnimationFrame(step)
+    else { _pulseRAF = null; render() }
+  }
+  _pulseRAF = requestAnimationFrame(step)
+}
 window.setPlaySpeed = function(val) {
   config.playSpeed = (val === 'slow' || val === 'fast') ? val : 'normal'
   saveConfig()
@@ -132,6 +147,7 @@ function setEditMode(mode) {
     if (state.selInstance) showNodePanel(state.selInstance)
     updateEditModeUI()
     save()
+    render()  // 立即重绘:清掉 Code 模式不该有的拖柄/提示(假 affordance 清除)
     return
   }
 
@@ -511,13 +527,16 @@ Object.defineProperty(window, 'selEdge', {
 export function initInput() {
   const canvas = document.getElementById('canvas')
 
-  // v0.13: 监听引擎 sa-tick 事件,更新 step-btn 文本 + A1 sparkline 原地重绘 + 重绘
+  // v0.13: 监听引擎 sa-tick 事件,更新 step-btn 文本 + A1 sparkline 原地重绘 + 通道 5 脉冲 + 重绘
   window.addEventListener('sa-tick', (e) => {
     const stepBtn = document.getElementById('step-btn')
     if (stepBtn) stepBtn.textContent = '▶ 下一步 (#' + e.detail.tickCount + ')'
     refreshSparklines()
+    triggerPulse(e.detail.vars)
     render()
   })
+  // 显示通道 5:propagate 触发脉冲(auto 模式每次编辑重算后也能看到流向)
+  window.addEventListener('sa-propagate', (e) => triggerPulse(e.detail.vars))
 
   document.addEventListener('click', function(e) {
     if (!e.target.closest('.menu-group') && !e.target.closest('.dropdown-menu') && !e.target.closest('.menu-trigger')) {
