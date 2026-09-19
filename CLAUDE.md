@@ -110,6 +110,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 - **UI labels are in Chinese; identifiers 分层支持 Unicode(ADR-004)**——序列化/序列化全链路、Code 模式、中文 attr key/class 名/varName 均支持 Unicode(`\p{L}`);仅 UI 新建节点 modal 的 className/varName 输入校验保持 ASCII(`utils.js` 版 `isValidIdentifier`)。`isValidIdentifier` 因此存在两份(codegraph Unicode 版 / utils ASCII 版),**不允许第三个实现**;放宽 UI 入口须新 ADR。
 - **演化层数据不序列化(ADR-005)**——traces/探测边等"运行时事实"不入 sourceCode、不入 URL hash;它们是易失观测层,`runSource`/`resetRuntime` 即清空。sourceCode 只承载作者意图(声明结构+声明边+方法体),观察值不回写。
 - **引用值 attr 序列化为 varName(ADR-006)**——`formatValue` 对带 `__instId` 的对象输出目标 varName,容器内任意深度递归保持引用身份;环/超深(>8)降级 `null`。**不允许**退回 JSON 化副本(会让引用静默变拷贝、探测边跨 session 消失)。
+- **序列化源是作者态快照(ADR-007)**——`serializeCode` 只写 `state.authorAttrs`(runSource 捕获、UI 编辑写穿);方法体/transform/stepAll 的演化值不进 sourceCode,reset 恢复作者态。新增改 attrs 的 UI 入口必须同步写穿(`src/author.js`)。
 
 ## Documentation
 
@@ -125,4 +126,5 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
   - [ADR-004 中文标识符分层支持](docs/decisions/adr-004-unicode-identifiers.md)
   - [ADR-005 执行观测立柱(step 推进激活)](docs/decisions/adr-005-execution-observation.md)
   - [ADR-006 双层边(探测边)L1](docs/decisions/adr-006-probe-edges-l1.md)
+  - [ADR-007 编辑快照层(演化值不自动固化)](docs/decisions/adr-007-author-snapshot-layer.md)
 - `docs/archive/` — 历史文档归档(v0.8 及之前的设计文档,设计意图参考,不维护)

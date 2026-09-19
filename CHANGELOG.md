@@ -25,11 +25,17 @@
   - 新建 `src/probe.js`:`deriveProbeEdges(state)` 遍历 attrs 引用推得隐式依赖——plain object/array 限深 4 + visited 防环,命中 `__instId` 对象即记且不深入(防 A→B→C 传染),跳过 `edges`/`__` 键;同对多引用收敛一条,`fields` 记全部 field-path;lazy 缓存 + `invalidateProbes`(失效点:`invalidateEdges` 聚合 / `runSource` / `evalTransforms` / `stepAll`)
   - renderer 在声明边下层画探测边:灰虚线 + 小箭头 + field-path 标签(仅 medium/full,首路径 + ×N);同对已有声明边则不画(探测 − 声明 = 未声明隐式依赖);新增 `rectExit`(medium/full 端点)+ `__sa_test.probeEdges` 测试钩子
 - e2e 测试 43:探测边数据面 / 渲染不崩 / 引用以 varName 序列化
-- **`scripts/test-skeleton.mjs` 骨架验证套件(40 项)**——有种子 fuzz(80 随机图 × 不动点 + 语义守恒 + 派生稳定)、编辑风暴(160 次运行时编辑 → 序列化 → 重载)、边界钉子(转义/环/悬空/Unicode/数值边界)、URL hash 往返、性能冒烟(150 节点/300 边)
-- e2e 测试 16 扩展:实例模式删除语义 3 项(现 175)
+- **`scripts/test-skeleton.mjs` 骨架验证套件(47 项)**——有种子 fuzz(80 随机图 × 不动点 + 语义守恒 + 派生稳定)、编辑风暴(160 次运行时编辑 → 序列化 → 重载)、边界钉子(转义/环/悬空/Unicode/数值边界)、URL hash 往返、性能冒烟(150 节点/300 边)
+- e2e 测试 16 扩展:实例模式删除语义 3 项(现 179)
+- **编辑快照层(ADR-007)**:
+  - 新建 `src/author.js`:`captureAuthorAttrs`(runSource 捕获作者态深拷贝,引用保身份、edges 逐条拷贝、跳过 `__` 键)/ `setAuthorAttr` / `deleteAuthorAttr` / `markEdgesEdited`
+  - `serializeCode` 序列化源改为 `state.authorAttrs`(缺失回退 live 仅作容错);UI 编辑路径全部写穿(panel 改值/加删属性/边与 transform 编辑、拖拽建边、类型模式默认值传播、删除实例/边清理);通道 4 override 下划线同源(表达"作者 override")
+  - 骨架验证 4.11 从"已知张力"翻转为"演化值不固化":步进/transform 结果不再被 UI 编辑顺带写进 sourceCode,reset 恢复作者态
+- e2e 测试 44:真实 UI 路径(transform 演化 + panel 编辑 + reset)验证演化值不落码;骨架 4.13/4.14 补 transform 结果与嵌套原地改写不固化
 
 ### Changed
 
+- **演化值不再被 UI 编辑固化(ADR-007)**——`stepAll`/`propagate`/transform 只改 live attrs;连播后编辑任一属性,sourceCode 只含被编辑键的作者值,演化值可见但不落码(reset/undo/import/load 经 `runSource` 重建快照)
 - **`formatValue` 支持实例引用保持身份(ADR-006)**——直接引用(带 `__instId`)输出目标 varName,容器内任意深度引用递归输出 varName(不再 `JSON.stringify` 成副本);容器环/超深(>8)降级 `null`;新增可选 `live` 参数,悬空引用(目标实例已删)降级 `null`(与 edges 悬空 target 同口径)
 - **serializeCode override 判定改用"序列化形态"比较**——formatValue 字面量不一致才输出 override 行,保证 `serialize(run(S1)) === S1` 不动点(悬空引用降级 null 且默认也是 null 时不再输出冗余 override)
 - **state.js `CanvasRenderingContext2D` polyfill 加 `typeof` guard**——engine.js 现可在 Node 直接 import(兑现 v0.13 "引擎 pure 化可 Node 测试"的承诺,此前 state.js 顶层 polyfill 会抛 `CanvasRenderingContext2D is not defined`)

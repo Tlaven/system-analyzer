@@ -269,7 +269,7 @@ minimal 模式下，边可能被路径上的其他圆形节点遮挡。这是**�
 | 1 | transform 活性标记（ƒ 角标） | `edge.transform` 非空（deriveEdges 已携带） | **三档全含（含 minimal）**——AI 链接打开默认就是 minimal 档 | 已实现 |
 | 2 | 方法体存在圆点 | `cls.methods.length > 0` | 三档通用小角标 | 已实现 |
 | 3 | 边 description 标签（中段截断文字） | `edge.description` | 仅 medium/full，minimal 保持鸟瞰 | 已实现 |
-| 4 | override 浅标记（属性行值淡下划线） | 值与 class 默认不等（与 serializeCode 的 `_equal` 判据一致；本行 2026-09-15 修正——原写"`key in inst.attrs` 且非 `key in cls.attrs`"，但 makeBridge 会拷贝 class attrs 到实例，key 存在性无法区分 override） | medium/full 属性行 | 已实现 |
+| 4 | override 浅标记（属性行值淡下划线） | **作者态值**（authorAttrs，ADR-007）与 class 默认不等（与 serializeCode 同源；演化值不触发下划线——它表达"作者 override"而非"与默认不同"） | medium/full 属性行 | 已实现 |
 | 5 | 执行脉冲（0.5s 波扫） | `sa-tick` / `sa-propagate` 事件触发（engine 只发事件，input 驱动 rAF，renderer 读 `state.pulse` 并过期清除） | 全档 | 已实现 |
 
 ### 去掉（假 affordance 清除）
@@ -283,7 +283,7 @@ minimal 模式下，边可能被路径上的其他圆形节点遮挡。这是**�
 
 - ƒ 角标画在边路径中点（圆底 + 斜体 ƒ），描述标签在中点上方 16px（不打架）；提取 `pointOnPath(t)` 供粒子动画/脉冲/角标共用
 - 脉冲语义：`stepAll` 发 `sa-tick`（vars = 本 tick 执行集合），`propagate` 发 `sa-propagate`（vars = 从起点起的下游集合），二者都触发；边波点要求两端都在集合内，节点画扩散环
-- 通道 4 画在 medium/full 节点属性行值下方（淡 accent 下划线），minimal 无属性行天然不做
+- 通道 4 画在 medium/full 节点属性行值下方（淡 accent 下划线），minimal 无属性行天然不做；判据读 authorAttrs（ADR-007 编辑快照层）
 
 ### 明确不做
 

@@ -8,6 +8,7 @@ import { state, MAX_UNDO } from './state.js'
 import { render } from './renderer.js'
 import { save, syncCodeFromRuntime, wrapAllInstances } from './io.js'
 import { runSource, invalidateEdges, deriveEdges } from './codegraph.js'
+import { markEdgesEdited } from './author.js'
 import { hidePanel } from './panel.js'
 
 // ============ Undo ============
@@ -75,8 +76,10 @@ export function delInstance(inst) {
     if (kept.length !== arr.length) {
       if (kept.length) other.attrs.edges = kept
       else delete other.attrs.edges
+      markEdgesEdited(state, other)  // ADR-007 写穿:入边清理是作者意图
     }
   }
+  if (state.authorAttrs) state.authorAttrs.delete(inst.varName)
   // 清理 visualState.positions/colors 中的孤儿条目
   delete state.visualState.positions[inst.varName]
   delete state.visualState.colors[inst.varName]
@@ -111,6 +114,7 @@ export function delEdge(e) {
   edges.splice(hit, 1)
   if (!edges.length) delete src.attrs.edges
   invalidateEdges()
+  markEdgesEdited(state, src)  // ADR-007 写穿
   if (state.selEdge === ed.id) deselectAll()
   syncCodeFromRuntime(); render()
 }

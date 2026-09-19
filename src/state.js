@@ -179,6 +179,7 @@ export const state = {
   // 执行
   tickCount: 0,
   traces: {},        // 演化层(ADR-005 A1):varName -> { [attr]: {tick, value}[] },环形缓冲 200,易失不入 sourceCode
+  authorAttrs: null, // 作者态快照(ADR-007):Map<varName, attrs>,runSource 捕获 + UI 编辑写穿;serializeCode 的序列化源
   playing: false,    // A2 连播中(易失 UI 状态)
   runtimeGen: 0,     // runSource 重建计数(连播守卫:换图即停,见 input.js)
   pulse: null,       // 显示通道 5:执行脉冲 { start, vars:Set|null },renderer 读+过期清除

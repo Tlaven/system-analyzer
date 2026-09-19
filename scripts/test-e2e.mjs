@@ -1255,6 +1255,54 @@ Node_1.edges = [{ target: Node_2 }]`
   check('数组内引用以 varName 序列化', src.includes('Node_1.pool = [Hub_1]'), src.slice(0, 60))
 }
 
+console.log('\n测试 44：ADR-007 演化值不固化(真实 UI 路径:transform 演化 + panel 编辑 + reset)')
+{
+  // 用 transform 驱动演化(无方法体 → import 不会切 Code 模式,panel 可编辑)
+  const TR_SAMPLE = `class S { attrs = { v: 1, label: 'x' } }
+class T { attrs = { v: 0, label: 'y' } }
+const S_1 = GraphStarter.add(S, 'S_1')
+const T_1 = GraphStarter.add(T, 'T_1')
+S_1.edges = [{ target: T_1, transform: "target['v'] = source['v'] + 1" }]`
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: '快照测试' })
+    const s1 = window.state.runtimeInstances.find(i => i.varName === 'S_1')
+    window.showNodePanel(s1)
+    window.setPanelMode('instance')
+  }, TR_SAMPLE)
+
+  // 1) panel 编辑 S_1.v = 10 → triggerPropagate 300ms 后 runTransforms → T_1.v = 11(演化)
+  await page.evaluate(() => {
+    const inp = document.getElementById('np-attr-v')
+    inp.value = '10'
+    inp.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await new Promise(r => setTimeout(r, 600))
+  const live = await page.evaluate(() => ({
+    s: window.state.runtimeInstances.find(i => i.varName === 'S_1').attrs.v,
+    t: window.state.runtimeInstances.find(i => i.varName === 'T_1').attrs.v,
+  }))
+  check('transform 演化生效(live T_1.v = 11)', live.s === 10 && live.t === 11, live)
+
+  // 2) 再编辑 label → syncCodeFromRuntime:演化值不落码,被编辑键落码
+  await page.evaluate(() => {
+    const inp = document.getElementById('np-attr-label')
+    inp.value = 'edited'
+    inp.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await new Promise(r => setTimeout(r, 200))
+  const src = await page.evaluate(() => window.state.sourceCode)
+  check('sourceCode 不含演化值(T_1.v = 11)', !/T_1\.v\s*=\s*11/.test(src), src)
+  check('sourceCode 含被编辑键(S_1.v = 10 / label)', /S_1\.v\s*=\s*10/.test(src) && /S_1\.label\s*=\s*'edited'/.test(src), src)
+
+  // 3) reset → 作者态:被编辑值保留,演化值丢弃
+  await page.evaluate(() => window.resetRuntime())
+  const after = await page.evaluate(() => ({
+    s: window.state.runtimeInstances.find(i => i.varName === 'S_1').attrs.v,
+    t: window.state.runtimeInstances.find(i => i.varName === 'T_1').attrs.v,
+  }))
+  check('reset 后 T_1.v 回作者态 0 / S_1.v 保留 10', after.s === 10 && after.t === 0, after)
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

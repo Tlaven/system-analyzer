@@ -14,6 +14,7 @@
 | **状态** | `src/state.js` | runtimeInstances / sourceCode / visualState / panelMode / traces(演化层,ADR-005) 等运行时状态(单例) |
 | **代码层(真相源)** | `src/codegraph.js` | `runSource` 执行 sourceCode、`serializeCode` 反向构建、`makeBridge` 提供 `GraphStarter.add`、`deriveEdges(state)` + lazy 缓存派生边视图(v0.13 从 io.js 迁入) |
 | **探测边派生** | `src/probe.js` | `deriveProbeEdges(state)`:遍历 attrs 引用推得隐式依赖(同对收敛 + 实例边界,ADR-006),lazy 缓存 + `invalidateProbes`;纯派生不序列化 |
+| **作者态快照** | `src/author.js` | `captureAuthorAttrs`(runSource 捕获)/ `setAuthorAttr` / `deleteAuthorAttr` / `markEdgesEdited`(UI 编辑写穿);serializeCode 的序列化源(ADR-007) |
 | **scanner** | `src/scanner.js` | 静态分析 sourceCode 字符串,提取 class 定义(读 `new cls()` 实例的 3 个 class field) |
 | **运行时层** | `src/io.js` | `wrapInstance` 加 getter、state 别名 |
 | **执行引擎** | `src/engine.js` | `topologicalSort` / `propagate` / `stepAll`(方法体调度,Code 模式方法体才生效)+ `evalTransforms` / `runTransforms`(边级 transform 表达式,ADR-003,跨模式生效)+ `getCycleMembers`(Tarjan SCC,ADR-005 A3)。v0.13 pure 化:无 DOM/render 依赖,`stepAll` 通过 `dispatchEvent('sa-tick')` 通知 UI;`stepAll` 末尾写 `state.traces`(A1)。**可 Node 单测**(`scripts/test-engine.mjs`) |
@@ -221,6 +222,8 @@ Code 模式交互:
 
 **双层边(ADR-006 L1)**. 声明边(`attrs.edges`,实线)= 作者意图;探测边(虚线灰)= 从 attrs 引用推而得的运行时事实,纯派生、不序列化。口径:`deriveProbeEdges` 遍历 plain object/array(限深 4 + visited 防环),命中带 `__instId` 的对象记引用且不深入(防 A→B→C 传染);同对多引用收敛一条,`fields` 记全部 field-path;跳过 `edges`/`__` 键;渲染时同对已有声明边则不画(探测 − 声明 = 隐式依赖)。失效点:`invalidateEdges`(结构变更聚合)/`runSource`/`evalTransforms`/`stepAll`;读时 lazy 重算。配套:引用值 attr 序列化为 varName(`formatValue` 递归保身份,否则 panel 一编辑就被 JSON 化成副本)。
 
+**作者态快照(ADR-007)**. `serializeCode` 的序列化源是 `state.authorAttrs`(`runSource` 结束时的作者态深拷贝),不是 live attrs;UI 编辑写穿(panel 改值/加删属性/边编辑、拖拽建边、类型模式传播、删除实例清理入边),方法体/transform/`stepAll` 只改 live。画布/panel/sparkline 仍读 live(演化值可见);reset/undo/import/load 经 `runSource` 自动重建快照。通道 4 override 下划线同源(表达"作者 override")。
+
 **持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。**载入失败保护**:`load()` 反序列化成功但 `runSource` 失败时置 `state.loadError`,`save()` 拒绝覆盖 `sa_data`(防止空画布的下一次编辑抹掉用户图);`loadError` 由成功操作清除(onNew / importSource / codeview commitCode 成功)。**载入守卫**:importSource 校验 version(≠6 拒绝)、尊重数据里的 editMode、UI 模式 + 程序化 sourceCode 时 confirm 推荐切 Code 模式载入。
 
 **旧格式硬切换。** v0.9 之前的 `sa_data`(version !== 6,含 v0.5 / v0.6 / v0.7 / v0.8)与 v0.9 不兼容(实例级 edges 模型与历史 class.edges + null 槽风格不兼容)。`load()` 检测到旧版本会丢弃并清空 `sa_data`,返回 false → 走 DEFAULT_BOOTSTRAP(空)。
@@ -304,3 +307,8 @@ v0.6/v0.8 时代的"命名端口"被 v0.9 砍掉——边是实例级数组,端�
 
 24. **探测边纯派生,不入 sourceCode、不入 URL hash**。`deriveProbeEdges` 只读 attrs;同对多引用收敛一条;命中实例边界即停(不穿透目标 attrs);跳过 `edges`/`__` 键;渲染层执行"探测 − 声明"差集(已有声明边不画探测边)。失效点必须覆盖:任何改引用或改实例集合的入口(`invalidateEdges` 聚合结构变更,engine 的 `evalTransforms`/`stepAll` 覆盖运行时赋值)。
 25. **引用值 attr 序列化为 varName,不得 JSON 化成副本**。`formatValue` 对直接引用(带 `__instId`)输出目标 varName,对容器内任意深度引用递归保持身份;悬空引用(目标实例已删)/容器环/超深(>8)降级 `null`(写已删 varName 会让重载 ReferenceError)。override 判定用**序列化形态比较**(formatValue 字面量),保证 `serialize(run(S1)) === S1` 不动点;`GraphStarter.add` 的 explicitName 必须是合法标识符(序列化要生成 `const` 绑定)。这是"探测边跨 session 存活"的前提(骨架验证:`scripts/test-skeleton.mjs`)。
+
+### 编辑快照不变量(ADR-007)
+
+26. **serializeCode 的序列化源是 `state.authorAttrs`**(作者态快照),不是 live attrs。方法体/transform/`stepAll` 对 attrs 的写入不进 sourceCode;reset/undo/import/load 经 `runSource` 重建快照。
+27. **authorAttrs 生命周期与 runtimeInstances 对齐**。任何改 attrs 的 UI 入口必须写穿(panel/input/editor 的编辑路径同步调 `src/author.js` 的 set/delete/markEdgesEdited);author 缺失时 serializeCode 回退 live 仅作容错,不是行为契约。

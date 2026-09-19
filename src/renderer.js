@@ -3,6 +3,7 @@ import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edg
 import { deriveEdges, nodeIndex, _equal } from './codegraph.js'
 import { getCycleMembers } from './engine.js'
 import { deriveProbeEdges } from './probe.js'
+import { authorAttrsOf } from './author.js'
 
 // 探测边端点:从节点中心沿连线方向与矩形边界求交(medium/full;minimal 走 edgePts 圆周)
 function rectExit(n, other) {
@@ -473,6 +474,8 @@ export function render() {
         ctx.font = '11px "Microsoft YaHei",sans-serif'
         const halfW = Math.max(20, contW / 2 - 4)
         const clsAttrs = (state.classes[n.className] && state.classes[n.className].attrs) || {}
+        // 显示通道 4 判据读作者态(ADR-007):下划线表达"作者 override",演化值不触发
+        const author = authorAttrsOf(state, n)
         for (const k of shown) {
           const v = formatScalar(n.properties[k])
           ctx.fillStyle = sc; ctx.textAlign = 'left'
@@ -480,8 +483,8 @@ export function render() {
           ctx.fillStyle = tc; ctx.textAlign = 'right'
           const vTxt = truncateText(ctx, v, halfW)
           ctx.fillText(vTxt, contR, iy)
-          // 显示通道 4:实例 override 浅下划线(值与 class 默认不等,与 serializeCode 判据一致)
-          if (k in n.attrs && !(k in clsAttrs && _equal(n.attrs[k], clsAttrs[k]))) {
+          // 显示通道 4:实例 override 浅下划线(作者态值与 class 默认不等,与 serializeCode 同源)
+          if (k in author && !(k in clsAttrs && _equal(author[k], clsAttrs[k]))) {
             const vw = ctx.measureText(vTxt).width
             ctx.save()
             ctx.globalAlpha = ctx.globalAlpha * 0.4

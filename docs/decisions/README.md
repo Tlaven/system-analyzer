@@ -30,6 +30,7 @@ ADR 是挡回重复提议的唯一挡箭牌。
 
 | 编号 | 标题 | 状态 | 日期 |
 |---|---|---|---|
+| [ADR-007](adr-007-author-snapshot-layer.md) | 编辑快照层(演化值不自动固化) | accepted | 2026-09-19 |
 | [ADR-006](adr-006-probe-edges-l1.md) | 双层边(探测边)L1 | accepted | 2026-09-15 |
 | [ADR-005](adr-005-execution-observation.md) | 执行观测立柱(推翻"step 不激活") | accepted / MVP 已实现 | 2026-09-14 |
 | [ADR-004](adr-004-unicode-identifiers.md) | 中文/Unicode 标识符支持(回溯补记) | accepted | 2026-09-14 |

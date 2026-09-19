@@ -12,6 +12,7 @@ import { state } from '../src/state.js'
 import { runSource, serializeCode, deriveEdges, invalidateEdges } from '../src/codegraph.js'
 import { deriveProbeEdges } from '../src/probe.js'
 import { runTransforms, stepAll } from '../src/engine.js'
+import { setAuthorAttr, deleteAuthorAttr, markEdgesEdited, authorAttrsOf } from '../src/author.js'
 import { toB64, fromB64 } from '../src/utils.js'
 import { DEFAULT_BOOTSTRAP } from '../src/bootstrap.js'
 
@@ -306,11 +307,21 @@ console.log('\n=== 区 3:编辑风暴(模拟 UI 反复改运行时 → 序列化
     if (insts.length < 2) return
     const inst = pick(rng, insts)
     const op = Math.floor(rng() * 10)
-    if (op === 0) inst.attrs[pick(rng, NEW_KEYS)] = Math.floor(rng() * 100)
-    else if (op === 1) inst.attrs[pick(rng, NEW_KEYS)] = pick(rng, STRS)
-    else if (op === 2) inst.attrs[pick(rng, NEW_KEYS)] = pick(rng, insts).attrs
-    else if (op === 3) inst.attrs[pick(rng, NEW_KEYS)] = [pick(rng, insts).attrs, { x: pick(rng, insts).attrs, y: 1 }]
-    else if (op === 4) {
+    // 镜像 UI 编辑路径:live attrs 与作者态快照同步写穿(ADR-007 不变量 27)
+    if (op === 0) {
+      const k = pick(rng, NEW_KEYS), v = Math.floor(rng() * 100)
+      inst.attrs[k] = v; setAuthorAttr(state, inst, k, v)
+    } else if (op === 1) {
+      const k = pick(rng, NEW_KEYS), v = pick(rng, STRS)
+      inst.attrs[k] = v; setAuthorAttr(state, inst, k, v)
+    } else if (op === 2) {
+      const k = pick(rng, NEW_KEYS), v = pick(rng, insts).attrs
+      inst.attrs[k] = v; setAuthorAttr(state, inst, k, v)
+    } else if (op === 3) {
+      const k = pick(rng, NEW_KEYS)
+      const v = [pick(rng, insts).attrs, { x: pick(rng, insts).attrs, y: 1 }]
+      inst.attrs[k] = v; setAuthorAttr(state, inst, k, v)
+    } else if (op === 4) {
       // 镜像 panel.deleteProperty 实例模式:class 默认键 = 重置回默认;额外键 = 真删除
       const ks = Object.keys(inst.attrs).filter(k => k !== 'edges' && !k.startsWith('__'))
       if (ks.length) {
@@ -319,8 +330,10 @@ console.log('\n=== 区 3:编辑风暴(模拟 UI 反复改运行时 → 序列化
         if (key in clsAttrs) {
           const dv = clsAttrs[key]
           inst.attrs[key] = (dv !== null && typeof dv === 'object') ? JSON.parse(JSON.stringify(dv)) : dv
+          setAuthorAttr(state, inst, key, inst.attrs[key])
         } else {
           delete inst.attrs[key]
+          deleteAuthorAttr(state, inst, key)
         }
       }
     } else if (op === 5) {
@@ -329,17 +342,21 @@ console.log('\n=== 区 3:编辑风暴(模拟 UI 反复改运行时 → 序列化
       if (rng() < 0.5) e.description = pick(rng, STRS)
       if (rng() < 0.4) e.transform = "target['v'] = (source['v'] || 0) + 1"
       inst.attrs.edges.push(e)
+      markEdgesEdited(state, inst)
     } else if (op === 6) {
-      if (Array.isArray(inst.attrs.edges) && inst.attrs.edges.length) inst.attrs.edges.splice(Math.floor(rng() * inst.attrs.edges.length), 1)
+      if (Array.isArray(inst.attrs.edges) && inst.attrs.edges.length) {
+        inst.attrs.edges.splice(Math.floor(rng() * inst.attrs.edges.length), 1)
+        markEdgesEdited(state, inst)
+      }
     } else if (op === 7) {
       if (Array.isArray(inst.attrs.edges) && inst.attrs.edges.length) {
         const e = pick(rng, inst.attrs.edges)
-        if (e) e.target = pick(rng, insts).attrs
+        if (e) { e.target = pick(rng, insts).attrs; markEdgesEdited(state, inst) }
       }
     } else if (op === 8) {
       if (Array.isArray(inst.attrs.edges) && inst.attrs.edges.length) {
         const e = pick(rng, inst.attrs.edges)
-        if (e) e.description = pick(rng, STRS)
+        if (e) { e.description = pick(rng, STRS); markEdgesEdited(state, inst) }
       }
     } else {
       if (insts.length > 2) insts.splice(insts.indexOf(inst), 1)  // 制造悬空引用
@@ -354,7 +371,8 @@ console.log('\n=== 区 3:编辑风暴(模拟 UI 反复改运行时 → 序列化
     for (let op = 0; op < OPS; op++) {
       applyRandomEdit()
       invalidateEdges()
-      runTransforms()
+      // 不跑 runTransforms:ADR-007 起 transform 结果是演化值,本就不该跨重载守恒
+      // (其"不固化"性质由区 4.13 单独验证);storm 比对的 before 即作者态语义
       const before = sig(state)
       let code
       try {
@@ -464,13 +482,42 @@ console.log('\n=== 区 4:边界与已知行为钉子 ===')
     check('UI 序列化不保留方法体(ADR-002 职责划分,已知)', !code.includes('tick()'))
   }
 
-  // 4.11 已知张力:UI 编辑会把步进演化值固化(与"reset 丢弃运行时 mutation"张力,待 ADR)
+  // 4.11 编辑快照层(ADR-007):演化值不固化;被编辑键固化;重载恢复作者态
   runSource("class C {\n  attrs = { n: 0, label: 'x' }\n  tick() { this.n = this.n + 1 }\n}\nconst C_1 = GraphStarter.add(C, 'C_1')", state)
   {
     stepAll(); stepAll(); stepAll()
-    state.runtimeInstances[0].attrs.label = 'edited'  // 模拟一次 panel 编辑
+    const inst = state.runtimeInstances[0]
+    inst.attrs.label = 'edited'                 // 模拟一次 panel 编辑
+    setAuthorAttr(state, inst, 'label', 'edited')  // ADR-007 写穿
     const code = serializeCode(state)
-    check('步进值被 UI 编辑固化(现状:reset 语义被侵蚀,待决策)', code.includes('n = 3'), code.split('\n').filter(l => l.includes('.n')).join('|'))
+    check('步进演化值不固化(n = 3 不在代码)', !/\.n\s*=\s*3/.test(code), code.split('\n').filter(l => l.includes('.n')).join('|'))
+    check('被编辑键固化(label = edited)', /C_1\.label\s*=\s*'edited'/.test(code), code.split('\n').filter(l => l.includes('label')).join('|'))
+    runSource(code, state)
+    check('重载即作者态(n 回 0,label 保留)',
+      state.runtimeInstances[0].attrs.n === 0 && state.runtimeInstances[0].attrs.label === 'edited',
+      state.runtimeInstances[0].attrs)
+  }
+
+  // 4.13 transform 结果不固化(演化值,重载后回到作者态)
+  runSource("class S { attrs = { v: 1 } }\nclass T { attrs = { v: 0 } }\nconst S_1 = GraphStarter.add(S, 'S_1')\nconst T_1 = GraphStarter.add(T, 'T_1')\nS_1.edges = [{ target: T_1, transform: \"target['v'] = source['v'] + 1\" }]", state)
+  {
+    runTransforms()
+    const liveV = state.runtimeInstances.find(i => i.varName === 'T_1').attrs.v
+    const code = serializeCode(state)
+    check('transform 执行生效(live v = 2)', liveV === 2, liveV)
+    check('transform 结果不固化(T_1.v 不在代码)', !/T_1\.v\s*=/.test(code), code.split('\n').filter(l => l.includes('T_1.')).join('|'))
+    runSource(code, state)
+    check('重载后 T_1.v 回到作者态 0', state.runtimeInstances.find(i => i.varName === 'T_1').attrs.v === 0)
+  }
+
+  // 4.14 方法体原地改写嵌套对象 → 也不固化(证明快照是深拷贝)
+  runSource("class N {\n  attrs = { o: { x: 0 } }\n  tick() { this.o.x = this.o.x + 1 }\n}\nconst N_1 = GraphStarter.add(N, 'N_1')", state)
+  {
+    stepAll()
+    const liveX = state.runtimeInstances[0].attrs.o.x
+    const code = serializeCode(state)
+    check('方法体原地改写生效(live x = 1)', liveX === 1, liveX)
+    check('嵌套对象演化不固化(x: 1 不在代码)', !/x:\s*1/.test(code), code.split('\n').filter(l => l.includes('x:')).join('|'))
   }
 
   // 4.12 删除语义(panel.deleteProperty 实例模式模型不变量):
@@ -479,11 +526,14 @@ console.log('\n=== 区 4:边界与已知行为钉子 ===')
   {
     const inst = state.runtimeInstances[0]
     inst.attrs.v = 9
+    setAuthorAttr(state, inst, 'v', 9)  // ADR-007 写穿
     const code1 = serializeCode(state)
     check('override 值输出', code1.includes('C_1.v = 9'), code1.split('\n').filter(l => l.includes('.v =')))
     runSource(code1, state)
     state.runtimeInstances[0].attrs.v = 5  // panel 删默认键 = 重置回默认
+    setAuthorAttr(state, state.runtimeInstances[0], 'v', 5)
     delete state.runtimeInstances[0].attrs.extra
+    deleteAuthorAttr(state, state.runtimeInstances[0], 'extra')
     const code2 = serializeCode(state)
     check('重置默认键后不再输出 override', !code2.includes('C_1.v = '), code2.split('\n').filter(l => l.includes('.v =')))
     const [s1, s2] = roundTrip(code2)

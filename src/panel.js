@@ -14,6 +14,7 @@ import { propagate, runTransforms } from './engine.js'
 import { esc } from './utils.js'
 import { getInstanceAttrKeys } from './attrkeys.js'
 import { _equal, invalidateEdges } from './codegraph.js'
+import { setAuthorAttr, deleteAuthorAttr, markEdgesEdited } from './author.js'
 import { showModal } from './modal.js'
 
 const $ = s => document.querySelector(s)
@@ -55,6 +56,7 @@ function propagateDefaultChange(cls, key, oldDefault, newDefault) {
     if (_equal(other.attrs[key], oldDefault)) {
       other.attrs[key] = (newDefault !== null && typeof newDefault === 'object')
         ? JSON.parse(JSON.stringify(newDefault)) : newDefault
+      setAuthorAttr(state, other, key, other.attrs[key])  // ADR-007 写穿
     }
   }
 }
@@ -77,11 +79,13 @@ function setEdgeTarget(inst, idx, targetVarName) {
   if (!targetVarName) {
     edges[idx].target = null
     invalidateEdges()
+    markEdgesEdited(state, inst)
     return
   }
   const target = state.runtimeInstances.find(i => i.varName === targetVarName)
   edges[idx].target = target ? target.attrs : null
   invalidateEdges()
+  markEdgesEdited(state, inst)
 }
 
 function setEdgeDescription(inst, idx, description) {
@@ -89,6 +93,7 @@ function setEdgeDescription(inst, idx, description) {
   if (idx < 0 || idx >= edges.length) return
   edges[idx].description = description
   invalidateEdges()
+  markEdgesEdited(state, inst)
 }
 
 export function setPanelMode(mode) {
@@ -190,6 +195,10 @@ window.showEdgePanel = showEdgePanel
 function _onTransformInput(textarea, edge) {
   markUndo()
   edge.transform = textarea.value
+  // ADR-007 写穿:从 edge.id 反查源实例(source>target>idx),刷新作者态 edges
+  const srcName = String(edge.id || '').split('>')[0]
+  const srcInst = state.runtimeInstances.find(i => i.varName === srcName)
+  if (srcInst) markEdgesEdited(state, srcInst)
   syncCodeFromRuntime()
   // 立即重算 transform(绕过 execMode,ADR-003 OQ#2:transform 像 Excel formula)
   runTransforms(); render()
@@ -527,6 +536,7 @@ export function showNodePanel(inst, highlightRef) {
           cls.name = this.value
         } else {
           inst.attrs.name = this.value
+          setAuthorAttr(state, inst, 'name', this.value)  // ADR-007 写穿
         }
         syncCodeFromRuntime(); render(); triggerPropagate(inst.varName)
       }
@@ -540,6 +550,7 @@ export function showNodePanel(inst, highlightRef) {
           cls.description = this.value
         } else {
           inst.attrs.description = this.value
+          setAuthorAttr(state, inst, 'description', this.value)  // ADR-007 写穿
         }
         syncCodeFromRuntime(); render()
       }
@@ -569,6 +580,7 @@ function _renderPropField({ propName, cont, inst, cls, codeMode, isType }) {
       propagateDefaultChange(cls, propName, oldDefault, newVal)
     } else {
       inst.attrs[propName] = newVal
+      setAuthorAttr(state, inst, propName, newVal)  // ADR-007 写穿
     }
     syncCodeFromRuntime(); render(); triggerPropagate(inst.varName)
   }
@@ -779,10 +791,14 @@ export async function addProperty() {
     // 同 class 实例：如果没 override，预填默认值（保持一致）
     for (const other of state.runtimeInstances) {
       if (other.className !== cls.id) continue
-      if (!(values.key in other.attrs)) other.attrs[values.key] = parsed
+      if (!(values.key in other.attrs)) {
+        other.attrs[values.key] = parsed
+        setAuthorAttr(state, other, values.key, parsed)  // ADR-007 写穿
+      }
     }
   } else {
     cur.attrs[values.key] = parsed
+    setAuthorAttr(state, cur, values.key, parsed)  // ADR-007 写穿
   }
   syncCodeFromRuntime(); render()
   showNodePanel(cur, values.key)
@@ -804,6 +820,7 @@ export function deleteProperty(propName) {
     for (const other of state.runtimeInstances) {
       if (other.className !== cls.id) continue
       delete other.attrs[propName]
+      deleteAuthorAttr(state, other, propName)  // ADR-007 写穿
     }
   } else {
     // 实例模式:class 默认值对所有实例成立,不存在"按实例删除默认键"。
@@ -812,8 +829,10 @@ export function deleteProperty(propName) {
     if (propName in (cls.attrs || {})) {
       const dv = cls.attrs[propName]
       cur.attrs[propName] = (dv !== null && typeof dv === 'object') ? JSON.parse(JSON.stringify(dv)) : dv
+      setAuthorAttr(state, cur, propName, cur.attrs[propName])  // ADR-007 写穿:重置回默认
     } else {
       delete cur.attrs[propName]
+      deleteAuthorAttr(state, cur, propName)  // ADR-007 写穿:真删除
     }
   }
   syncCodeFromRuntime(); render()
@@ -853,6 +872,7 @@ export async function addInstanceEdge() {
   if (!Array.isArray(cur.attrs.edges)) cur.attrs.edges = []
   cur.attrs.edges.push({ target: target ? target.attrs : null, description: values.description })
   invalidateEdges()
+  markEdgesEdited(state, cur)  // ADR-007 写穿
   syncCodeFromRuntime(); render()
   showNodePanel(cur)
 }
@@ -868,6 +888,7 @@ export function removeInstanceEdge(idx) {
   edges.splice(idx, 1)
   if (edges.length === 0) delete cur.attrs.edges
   invalidateEdges()
+  markEdgesEdited(state, cur)  // ADR-007 写穿
   syncCodeFromRuntime(); render()
   showNodePanel(cur)
 }

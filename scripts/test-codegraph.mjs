@@ -3,6 +3,7 @@
 // 模型：3 个实例级 class field（description / name / attrs），edges 是实例级 attrs.edges 数组
 import { splitSource } from '../src/parser.js'
 import { runSource, serializeCode, resetRuntime } from '../src/codegraph.js'
+import { setAuthorAttr } from '../src/author.js'
 import { DEFAULT_BOOTSTRAP } from '../src/bootstrap.js'
 
 let pass = 0, fail = 0
@@ -280,8 +281,9 @@ console.log('\n=== 区 9：override 决策（class 默认永远保留）===')
   state.sourceCode = V09_SAMPLE
   runSource(state.sourceCode, state)
 
-  // 改 Source_1.rate = 99（新 override）
+  // 改 Source_1.rate = 99（新 override）——模拟 UI 编辑:live + 作者态写穿(ADR-007)
   state.runtimeInstances[0].attrs.rate = 99
+  setAuthorAttr(state, state.runtimeInstances[0], 'rate', 99)
 
   const serialized = serializeCode(state)
 
@@ -290,6 +292,7 @@ console.log('\n=== 区 9：override 决策（class 默认永远保留）===')
 
   // 改回默认值，override 应消失
   state.runtimeInstances[0].attrs.rate = 1
+  setAuthorAttr(state, state.runtimeInstances[0], 'rate', 1)
   const serialized2 = serializeCode(state)
   check('改回默认值后 override 消失', !/Source_1\.rate\s*=/.test(serialized2), serialized2)
 }

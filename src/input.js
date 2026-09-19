@@ -14,6 +14,7 @@ import { stepAll, propagate, runTransforms } from './engine.js'
 import { splitSource, isSourceCodeProgrammatic } from './parser.js'
 import { runSource, _equal, formatValue } from './codegraph.js'
 import { deriveProbeEdges } from './probe.js'
+import { authorAttrsOf, markEdgesEdited } from './author.js'
 
 // 测试与调试钩子
 window.state = state
@@ -231,23 +232,25 @@ function buildEmptyClassSource(className) {
 }
 
 // 构造复制块：add 调用 + override + edges 数组
+// 值取作者态(ADR-007):复制演化中的节点不会把演化值固化进剪贴板/源码
 function buildCopyBlock(srcInst, newVar) {
   const cls = state.classes[srcInst.className]
   const clsAttrs = (cls && cls.attrs) || {}
+  const author = authorAttrsOf(state, srcInst)
   // 悬空引用(实例已删)序列化降级 null,与 serializeCode 同口径
   const liveAttrs = new Set(state.runtimeInstances.map(i => i.attrs))
   const lines = [`const ${newVar} = GraphStarter.add(${srcInst.className}, ${JSON.stringify(newVar)})`]
-  for (const key of Object.keys(srcInst.attrs)) {
+  for (const key of Object.keys(author)) {
     if (key.startsWith('__')) continue
     if (key === 'edges') continue   // edges 单独处理
     const defaultVal = clsAttrs[key]
-    const curVal = srcInst.attrs[key]
+    const curVal = author[key]
     if (!_equal(defaultVal, curVal)) {
       lines.push(`${newVar}.${key} = ${formatValue(curVal, liveAttrs)}`)
     }
   }
   // edges 数组复制（target 引用原样保留——指向相同目标实例）
-  const edges = srcInst.attrs.edges
+  const edges = author.edges
   if (Array.isArray(edges) && edges.length > 0) {
     const items = edges.map(e => {
       const tgtVar = (e && e.target && e.target.__instId && liveAttrs.has(e.target))
@@ -411,6 +414,7 @@ async function createEdgeFromDrag(srcInst, targetInst) {
   if (!Array.isArray(srcInst.attrs.edges)) srcInst.attrs.edges = []
   srcInst.attrs.edges.push({ target: targetInst.attrs, description: values.description })
   invalidateEdges()
+  markEdgesEdited(state, srcInst)  // ADR-007 写穿
   syncCodeFromRuntime(); render()
   showNodePanel(srcInst)
 }

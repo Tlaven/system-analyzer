@@ -16,6 +16,7 @@ import { splitSource } from './parser.js'
 import { scanClass } from './scanner.js'
 import { getInstanceAttrKeys } from './attrkeys.js'
 import { invalidateProbes } from './probe.js'
+import { captureAuthorAttrs, authorAttrsOf } from './author.js'
 
 // ============ 派生边视图 + lazy 缓存 ============
 //
@@ -224,6 +225,9 @@ export function runSource(sourceCode, state) {
 
   state.runtimeInstances.push(...bridge._instances)
   invalidateEdges()
+  // 作者态快照(ADR-007):serializeCode 的序列化源。此后 live attrs 的演化
+  // (方法体/transform/stepAll)不影响序列化;UI 编辑经 author.js 写穿。
+  captureAuthorAttrs(state)
 }
 
 // 把当前 runtimeInstances 序列化回 sourceCode 字符串
@@ -264,12 +268,15 @@ export function serializeCode(_state) {
   }
 
   // 2. attrs override(非 edges、非默认值)+ edges 数组赋值
+  // 序列化源 = authorAttrs(ADR-007 作者态快照),不是 live attrs:方法体/transform/stepAll
+  // 的演化值不进代码;UI 编辑路径已写穿快照。缺失时 authorAttrsOf 回退 live(仅容错)。
   for (const inst of state.runtimeInstances) {
     const cls = state.classes[inst.className]
     const clsAttrs = (cls && cls.attrs) || {}
+    const author = authorAttrsOf(state, inst)
 
-    for (const key of getInstanceAttrKeys(inst)) {
-      const curVal = inst.attrs[key]
+    for (const key of getInstanceAttrKeys({ attrs: author })) {
+      const curVal = author[key]
       const defaultVal = clsAttrs[key]
       // 比较"序列化形态"而非 _equal:悬空引用/环/超深会被 formatValue 降级,
       // 用降级后的字面量判断是否与默认一致,保证 serialize(run(S1)) === S1 不动点
@@ -282,7 +289,7 @@ export function serializeCode(_state) {
 
     // edges 数组：每条 { target, description, transform? }，target 序列化为目标 varName
     // 悬空 target（指向已删实例）输出 null——写 varName 会产生 ReferenceError，整图无法加载
-    const edges = inst.attrs.edges
+    const edges = author.edges
     if (Array.isArray(edges) && edges.length > 0) {
       const items = edges.map(e => {
         const tgtVar = (e && e.target && typeof e.target === 'object' && e.target.__instId && liveAttrs.has(e.target))
