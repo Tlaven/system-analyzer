@@ -30,6 +30,8 @@ ADR 是挡回重复提议的唯一挡箭牌。
 
 | 编号 | 标题 | 状态 | 日期 |
 |---|---|---|---|
+| [ADR-009](adr-009-ai-transport-contract.md) | AI 传输契约(代码块主通道,URL 降级) | accepted / 待验证 | 2026-09-19 |
+| [ADR-008](adr-008-import-execution-gate.md) | 外部导入执行闸门(白名单分类 + 确认 + CSP) | accepted | 2026-09-19 |
 | [ADR-007](adr-007-author-snapshot-layer.md) | 编辑快照层(演化值不自动固化) | accepted | 2026-09-19 |
 | [ADR-006](adr-006-probe-edges-l1.md) | 双层边(探测边)L1 | accepted | 2026-09-15 |
 | [ADR-005](adr-005-execution-observation.md) | 执行观测立柱(推翻"step 不激活") | accepted / MVP 已实现 | 2026-09-14 |
