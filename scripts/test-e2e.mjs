@@ -478,6 +478,29 @@ console.log('\n测试 16：实例模式删属性 → 仅从 inst.attrs 删（cla
   })
   check('inst.attrs 不含 extraField', stats.instNoExtra === true, stats.instNoExtra)
   check('sourceCode 不含 extraField', stats.srcNoExtra === true, stats.srcNoExtra)
+
+  // class 默认键:删除 = 重置回默认(bridge 把默认值拷贝进实例,直接 delete 会在重载后复活)
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: '删默认键' })
+    const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
+    s1.attrs.rate = 99
+    window.syncCodeFromRuntime()
+    window.showNodePanel(s1)
+    window.setPanelMode('instance')
+    window.deleteProperty('rate')
+  }, V09_SAMPLE)
+  await new Promise(r => setTimeout(r, 200))
+  const stats2 = await page.evaluate(() => {
+    const s1 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
+    const beforeReload = { hasKey: 'rate' in s1.attrs, val: s1.attrs.rate }
+    const srcNoOverride = !/Source_1\.rate\s*=/.test(window.state.sourceCode)
+    window.__sa_test.importJSON({ sourceCode: window.state.sourceCode, title: '删默认键 reload' })
+    const s2 = window.state.runtimeInstances.find(i => i.varName === 'Source_1')
+    return { beforeReload, srcNoOverride, afterVal: s2.attrs.rate, afterHasKey: 'rate' in s2.attrs }
+  })
+  check('删默认键 = 重置回默认(键保留,值 1)', stats2.beforeReload.hasKey === true && stats2.beforeReload.val === 1, stats2.beforeReload)
+  check('sourceCode 无 rate override 行', stats2.srcNoOverride === true, stats2)
+  check('重载后仍是默认值 1(键复活但值一致)', stats2.afterHasKey === true && stats2.afterVal === 1, stats2)
 }
 
 console.log('\n测试 17：实例级 description 编辑 → sourceCode 多行赋值')

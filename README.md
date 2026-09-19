@@ -36,6 +36,7 @@ npm run build      # bundle src/main.js → dist/index.html (single file)
 node scripts/test-codegraph.mjs    # 核心引擎单元测试(runSource/serializeCode/resetRuntime)
 node scripts/test-engine.mjs       # 执行观测单元测试(traces/环成员识别,无浏览器)
 node scripts/test-roundtrip.mjs    # scanner 静态分析单元测试(无浏览器)
+node scripts/test-skeleton.mjs     # 骨架验证(往返不动点 fuzz + 编辑风暴 + 边界钉子,无浏览器)
 node scripts/test-e2e.mjs          # puppeteer e2e(loads dist/index.html — MUST build first)
 ```
 

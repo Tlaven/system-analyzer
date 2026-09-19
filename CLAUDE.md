@@ -34,10 +34,11 @@ npm run dev                            # watch + dev server at localhost:8000
 node scripts/test-codegraph.mjs        # v0.9 核心引擎单元测试(runSource/serializeCode/resetRuntime)
 node scripts/test-engine.mjs           # 执行观测单元测试(traces 记录/环形缓冲 + 环成员识别,无浏览器)
 node scripts/test-roundtrip.mjs        # scanner 静态分析单元测试(无浏览器)
+node scripts/test-skeleton.mjs         # 骨架验证(往返不动点 fuzz + 编辑风暴 + 边界钉子,无浏览器)
 node scripts/test-e2e.mjs              # puppeteer, loads dist/index.html — MUST `npm run build` first
 ```
 
-No test runner, lint, or typecheck. Verification is manual in the browser, plus the four `.mjs` scripts above.
+No test runner, lint, or typecheck. Verification is manual in the browser, plus the five `.mjs` scripts above.
 
 ## 架构
 
@@ -114,7 +115,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 
 - `src/llms.txt` — AI-facing onboarding doc,copied to `dist/` on build(AI 自发现的入口契约)
 - `docs/architecture.md` — **L2 架构层**:模块清单、双模式编辑 + 实例级 edges 模型、主流程叙述、关键决策、架构不变量
-- `docs/visualization-modes.md` — **渲染层 L3**:画布三档信息密度(minimal 圆 / medium/full 圆角矩形)+ 防溢出 + hover tooltip + 边可视化哲学 + 显示通道(ƒ 角标/方法体圆点/description/override 下划线/执行脉冲)
+- `docs/visualization-modes.md` — **渲染层 L3**:画布三档信息密度(minimal 圆 / medium/full 圆角矩形)+ 防溢出 + hover tooltip + 边可视化哲学 + 显示通道(ƒ 角标/方法体圆点/边 description/override 下划线/执行脉冲)
 - `docs/edge-routing.md` — **路由层 L3**:三种布线(straight 不绕 / curve 软绕 / orthogonal 硬绕)+ 端口系统(算法层端口重新引入)+ 避让算法 + 落地次序
 - `docs/layouts.md` — **布局层 L3**:四种布局(manual/force/circular/hierarchical)重做方向 + grid 新增 + 三个感知(拓扑/方向/模式)+ 与端口方向联动
 - `docs/decisions/` — **ADR 决策记录**:重大架构决策 + 被拒方案。当前包含:

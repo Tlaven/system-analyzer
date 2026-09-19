@@ -806,7 +806,15 @@ export function deleteProperty(propName) {
       delete other.attrs[propName]
     }
   } else {
-    delete cur.attrs[propName]
+    // 实例模式:class 默认值对所有实例成立,不存在"按实例删除默认键"。
+    // 删默认键 = 重置回默认值(bridge 会把默认值拷贝进实例;直接 delete 的话重载后
+    // 默认键会复活,且方法体里 this.key 在删与不删两个状态下语义不一致)。
+    if (propName in (cls.attrs || {})) {
+      const dv = cls.attrs[propName]
+      cur.attrs[propName] = (dv !== null && typeof dv === 'object') ? JSON.parse(JSON.stringify(dv)) : dv
+    } else {
+      delete cur.attrs[propName]
+    }
   }
   syncCodeFromRuntime(); render()
   showNodePanel(cur)

@@ -18,7 +18,7 @@
 | **运行时层** | `src/io.js` | `wrapInstance` 加 getter、state 别名 |
 | **执行引擎** | `src/engine.js` | `topologicalSort` / `propagate` / `stepAll`(方法体调度,Code 模式方法体才生效)+ `evalTransforms` / `runTransforms`(边级 transform 表达式,ADR-003,跨模式生效)+ `getCycleMembers`(Tarjan SCC,ADR-005 A3)。v0.13 pure 化:无 DOM/render 依赖,`stepAll` 通过 `dispatchEvent('sa-tick')` 通知 UI;`stepAll` 末尾写 `state.traces`(A1)。**可 Node 单测**(`scripts/test-engine.mjs`) |
 | **持久化** | `src/main.js` 内 `load`/`save` | `sa_data` 存 `{version, sourceCode, visualState, ...}`,URL hash 分享 base64 |
-| **渲染** | `src/renderer.js` | Canvas 2D,按 `infoLevel` 三档渲染节点 + 边布线 + 显示通道(ƒ 角标/方法体圆点/description/override 下划线/执行脉冲,详见 `visualization-modes.md` §10) |
+| **渲染** | `src/renderer.js` | Canvas 2D,按 `infoLevel` 三档渲染节点 + 边布线 + 显示通道(ƒ 角标/方法体圆点/边 description/override 下划线/执行脉冲,详见 `visualization-modes.md` §10) |
 | **路由** | `src/utils.js` (`edgePts` 等) | 边端点 + 控制点几何计算 |
 | **布局** | `src/physics.js` | manual/force/circular/hierarchical 四种自动布局 |
 | **panel** | `src/panel.js` | 类型/实例 segmented control + 节点 panel(属性/边编辑)+ 独立边 panel(ADR-003 OQ#1,transform 编辑入口) |
@@ -303,4 +303,4 @@ v0.6/v0.8 时代的"命名端口"被 v0.9 砍掉——边是实例级数组,端�
 ### 双层边不变量(ADR-006)
 
 24. **探测边纯派生,不入 sourceCode、不入 URL hash**。`deriveProbeEdges` 只读 attrs;同对多引用收敛一条;命中实例边界即停(不穿透目标 attrs);跳过 `edges`/`__` 键;渲染层执行"探测 − 声明"差集(已有声明边不画探测边)。失效点必须覆盖:任何改引用或改实例集合的入口(`invalidateEdges` 聚合结构变更,engine 的 `evalTransforms`/`stepAll` 覆盖运行时赋值)。
-25. **引用值 attr 序列化为 varName,不得 JSON 化成副本**。`formatValue` 对直接引用(带 `__instId`)输出目标 varName,对容器内任意深度引用递归保持身份;容器环/超深(>8)降级 `null`。这是"探测边跨 session 存活"的前提。
+25. **引用值 attr 序列化为 varName,不得 JSON 化成副本**。`formatValue` 对直接引用(带 `__instId`)输出目标 varName,对容器内任意深度引用递归保持身份;悬空引用(目标实例已删)/容器环/超深(>8)降级 `null`(写已删 varName 会让重载 ReferenceError)。override 判定用**序列化形态比较**(formatValue 字面量),保证 `serialize(run(S1)) === S1` 不动点;`GraphStarter.add` 的 explicitName 必须是合法标识符(序列化要生成 `const` 绑定)。这是"探测边跨 session 存活"的前提(骨架验证:`scripts/test-skeleton.mjs`)。

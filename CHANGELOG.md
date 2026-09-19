@@ -25,10 +25,13 @@
   - 新建 `src/probe.js`:`deriveProbeEdges(state)` 遍历 attrs 引用推得隐式依赖——plain object/array 限深 4 + visited 防环,命中 `__instId` 对象即记且不深入(防 A→B→C 传染),跳过 `edges`/`__` 键;同对多引用收敛一条,`fields` 记全部 field-path;lazy 缓存 + `invalidateProbes`(失效点:`invalidateEdges` 聚合 / `runSource` / `evalTransforms` / `stepAll`)
   - renderer 在声明边下层画探测边:灰虚线 + 小箭头 + field-path 标签(仅 medium/full,首路径 + ×N);同对已有声明边则不画(探测 − 声明 = 未声明隐式依赖);新增 `rectExit`(medium/full 端点)+ `__sa_test.probeEdges` 测试钩子
 - e2e 测试 43:探测边数据面 / 渲染不崩 / 引用以 varName 序列化
+- **`scripts/test-skeleton.mjs` 骨架验证套件(40 项)**——有种子 fuzz(80 随机图 × 不动点 + 语义守恒 + 派生稳定)、编辑风暴(160 次运行时编辑 → 序列化 → 重载)、边界钉子(转义/环/悬空/Unicode/数值边界)、URL hash 往返、性能冒烟(150 节点/300 边)
+- e2e 测试 16 扩展:实例模式删除语义 3 项(现 175)
 
 ### Changed
 
-- **`formatValue` 支持实例引用保持身份(ADR-006)**——直接引用(带 `__instId`)输出目标 varName,容器内任意深度引用递归输出 varName(不再 `JSON.stringify` 成副本);容器环/超深(>8)降级 `null`。不修的话:panel 一编辑 → `syncCodeFromRuntime` 把引用静默变拷贝 → 重载后引用身份与探测边一起消失
+- **`formatValue` 支持实例引用保持身份(ADR-006)**——直接引用(带 `__instId`)输出目标 varName,容器内任意深度引用递归输出 varName(不再 `JSON.stringify` 成副本);容器环/超深(>8)降级 `null`;新增可选 `live` 参数,悬空引用(目标实例已删)降级 `null`(与 edges 悬空 target 同口径)
+- **serializeCode override 判定改用"序列化形态"比较**——formatValue 字面量不一致才输出 override 行,保证 `serialize(run(S1)) === S1` 不动点(悬空引用降级 null 且默认也是 null 时不再输出冗余 override)
 - **state.js `CanvasRenderingContext2D` polyfill 加 `typeof` guard**——engine.js 现可在 Node 直接 import(兑现 v0.13 "引擎 pure 化可 Node 测试"的承诺,此前 state.js 顶层 polyfill 会抛 `CanvasRenderingContext2D is not defined`)
 - `runSource` 现在清空演化层(`state.traces` / `tickCount`)并递增 `state.runtimeGen`(连播守卫:换图即停);演化数据仍不入 sourceCode/URL(ADR-005)
 - renderer.js 抽取 `drawEdgePath()` helper——主路径 / 环边标记 / dashFlow 动画三处共用,消除路径绘制重复
@@ -39,6 +42,14 @@
 - 补 codegraph.js `isValidIdentifier` 注释,说明与 utils.js ASCII 版的职责差异(序列化层 Unicode vs UI 校验层 ASCII,由 CLAUDE.md 不变量"code identifiers are camelCase English"决定,勿统一)
 - **`showModal` 抽到新 `src/modal.js`**——斩断 `panel.js → input.js` 反向上行依赖(panel.js:17 改 import 源)。showModal 是 UI 原语(input.js 调:创建/复制节点、拖边;panel.js 调:加属性、加边),原本 panel 反向 import 事件层是设计异味,现 5 个 call site 都改从 `./modal.js` 进。`__modalPrefill` 测试钩子作为 showModal 内部契约跟着走
 - **测试钩子命名空间化**——3 个散落的 `window.__testImport` / `window.__modalPrefill` / `window.__epAutocompleteState` 统一到 `window.__sa_test = { importJSON, modalPrefill, epAutocompleteState }`。各源文件 lazy init(`window.__sa_test = window.__sa_test || {}`)挂自己的钩子,test-e2e.mjs 48 处调用方机械替换。无兼容层(做减法,旧名一次性砍掉)
+
+### Fixed
+
+- **单引号字面量转义补全**——`_escapeSingle` 统一处理字符串值与 attr key 的 `\n` / `\r` / U+2028 / U+2029(此前仅 `\n`);含 CR 的字符串或换行 attr key 序列化会产出语法错误 sourceCode(骨架 fuzz 发现)
+- **悬空引用序列化降级 null**——实例删除后,其他实例 attrs 里指向它的引用(含容器内嵌套)此前序列化成已删 varName → 重载 `ReferenceError: X is not defined`;现与 edges 悬空 target 同口径降级 null(serializeCode 传 live 集合;input.js 剪贴板复制同步)
+- **`_equal` 引用感知深比较**——此前对含引用/环的对象走 `JSON.stringify`,引用目标 attrs 的 edges 环会抛 "Converting circular structure to JSON"(serialize / panel / renderer override 下划线三处消费者共用);现引用比身份(`a === b`)不深入,普通容器深比较(键序无关),环用 seen 防递归
+- **非法 explicitName 显式报错**——`GraphStarter.add(cls, 'a b')` 此前静默接受,序列化产出 `const a b = ...` 重载即断链;现 add 时校验 `isValidIdentifier` 并抛出清晰错误(llms.txt 同步说明)
+- **实例模式删除 class 默认键 = 重置回默认**——此前 `delete inst.attrs[key]` 后重载会"复活"默认键,且方法体内 `this.key` 在删与不删两态语义不一致;现物化默认值(`panel.deleteProperty` 实例分支)
 
 ### Removed
 

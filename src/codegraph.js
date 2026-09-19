@@ -126,6 +126,13 @@ function makeBridge() {
       const attrs = JSON.parse(JSON.stringify(attrsInit))
       let varName
       if (explicitName && typeof explicitName === 'string') {
+        // explicitName 会成为序列化的 `const <name> = ...` 绑定名,必须是合法标识符。
+        // 不校验的话 'a b' / 'a-b' 这类名字能跑,但一序列化就产出语法错误的 sourceCode(断链)。
+        if (!isValidIdentifier(explicitName)) {
+          throw new Error(
+            'GraphStarter.add 的 explicitName 必须是合法标识符(序列化要生成 const 绑定),收到: ' + JSON.stringify(explicitName)
+          )
+        }
         varName = explicitName
       } else {
         counters[cls.name] = (counters[cls.name] || 0) + 1
@@ -225,6 +232,8 @@ export function runSource(sourceCode, state) {
 export function serializeCode(_state) {
   const state = _state
   const classLines = []
+  // 活实例集合:悬空引用(实例已删)序列化降级 null,写 varName 会 ReferenceError
+  const liveAttrs = new Set(state.runtimeInstances.map(i => i.attrs))
 
   // class 段：从 state.classes 反向构建
   for (const clsName of Object.keys(state.classes)) {
@@ -239,7 +248,7 @@ export function serializeCode(_state) {
     // 新增内部字段时,统一用 `__xxx` 前缀,serializeCode 会自动忽略。
     const attrsEntries = getInstanceAttrKeys(cls).map(k => [k, (cls.attrs || {})[k]])
     const attrsLiteral = attrsEntries.length
-      ? '{\n' + attrsEntries.map(([k, v]) => '    ' + (isValidIdentifier(k) ? k : quoteKey(k)) + ': ' + formatValue(v)).join(',\n') + '\n  }'
+      ? '{\n' + attrsEntries.map(([k, v]) => '    ' + (isValidIdentifier(k) ? k : quoteKey(k)) + ': ' + formatValue(v, liveAttrs)).join(',\n') + '\n  }'
       : '{}'
     classLines.push('  attrs = ' + attrsLiteral)
     classLines.push('}')
@@ -254,8 +263,7 @@ export function serializeCode(_state) {
     bootLines.push('const ' + inst.varName + ' = GraphStarter.add(' + inst.className + ', ' + formatValue(inst.varName) + ')')
   }
 
-  // 2. attrs override（非 edges、非默认值）+ edges 数组赋值
-  const liveAttrs = new Set(state.runtimeInstances.map(i => i.attrs))
+  // 2. attrs override(非 edges、非默认值)+ edges 数组赋值
   for (const inst of state.runtimeInstances) {
     const cls = state.classes[inst.className]
     const clsAttrs = (cls && cls.attrs) || {}
@@ -263,9 +271,12 @@ export function serializeCode(_state) {
     for (const key of getInstanceAttrKeys(inst)) {
       const curVal = inst.attrs[key]
       const defaultVal = clsAttrs[key]
-      if (!_equal(defaultVal, curVal)) {
+      // 比较"序列化形态"而非 _equal:悬空引用/环/超深会被 formatValue 降级,
+      // 用降级后的字面量判断是否与默认一致,保证 serialize(run(S1)) === S1 不动点
+      // (例:悬空引用降级 null 且默认也是 null → 首轮就不该输出冗余 override)。
+      if (formatValue(curVal, liveAttrs) !== formatValue(defaultVal, liveAttrs)) {
         const keyExpr = isValidIdentifier(key) ? '.' + key : '[' + quoteKey(key) + ']'
-        bootLines.push(inst.varName + keyExpr + ' = ' + formatValue(curVal))
+        bootLines.push(inst.varName + keyExpr + ' = ' + formatValue(curVal, liveAttrs))
       }
     }
 
@@ -302,16 +313,42 @@ export function resetRuntime(state) {
 }
 
 // 用于检测实例 override:属性值跟 class 默认是否相等(相等就不输出 override 行)。
-// 用 JSON.stringify 比对象有两个边界要注意:
-//   - 键序敏感:`{a:1,b:2}` ≠ `{b:2,a:1}`(实际场景里同一赋值路径不会乱序,但不保证)
-//   - `undefined` 会被 JSON 丢弃:`{a:undefined}` 序列化成 `{}`,跟 `{}` 相等
-// 实际场景下基本准,但加新属性类型(如 Symbol / 函数)时要想到这里的近似性。
+// 引用感知:B-L1 起属性值可能是实例引用(attrs 对象),引用只在身份相等时相等(a===b),
+// 不深入引用目标——否则目标 attrs 的 edges 环会让 JSON.stringify 抛
+// "Converting circular structure to JSON"(serialize / panel / renderer 三处消费者共用)。
+// 普通容器深比较(键序无关);非 plain object(Date 等)仍走 JSON.stringify。
 export function _equal(a, b) {
+  return _deepEqual(a, b, new Map())
+}
+
+function _deepEqual(a, b, seen) {
   if (a === b) return true
   if (a === null || b === null) return false
   if (typeof a !== typeof b) return false
-  if (typeof a === 'object') return JSON.stringify(a) === JSON.stringify(b)
-  return false
+  if (typeof a !== 'object') return false
+  if (a.__instId || b.__instId) return false
+  const pa = Object.getPrototypeOf(a)
+  if (!Array.isArray(a) && pa !== Object.prototype && pa !== null) {
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+  if (seen.has(a)) return seen.get(a) === b
+  seen.set(a, b)
+  let eq = true
+  if (Array.isArray(a) !== Array.isArray(b)) {
+    eq = false
+  } else if (Array.isArray(a)) {
+    if (a.length !== b.length) eq = false
+    else for (let i = 0; i < a.length && eq; i++) eq = _deepEqual(a[i], b[i], seen)
+  } else {
+    const ka = Object.keys(a).filter(k => !k.startsWith('__'))
+    const kb = Object.keys(b).filter(k => !k.startsWith('__'))
+    if (ka.length !== kb.length) eq = false
+    else for (const k of ka) {
+      if (!(k in b) || !_deepEqual(a[k], b[k], seen)) { eq = false; break }
+    }
+  }
+  seen.delete(a)
+  return eq
 }
 
 // 序列化层：判断 class/var/attr key 是否需要加引号。Unicode 版因为 scanner(v0.10 起)
@@ -321,39 +358,55 @@ function isValidIdentifier(str) {
   return /^[$$_\p{L}][$_\p{L}\d]*$/u.test(str)
 }
 
+// 单引号字符串字面量转义(字符串值/attr key 共用)。
+// 行终止符(U+000A/U+000D/U+2028/U+2029)必须转义,否则产出语法错误的 sourceCode。
+function _escapeSingle(str) {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
 function quoteKey(k) {
-  return "'" + k.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"
+  return "'" + _escapeSingle(k) + "'"
 }
 
 // 值 → JS 字面量。B-L1 起支持"实例引用保持身份":
 //   - 直接引用(attrs 带 __instId)→ 输出目标 varName
 //   - 嵌套容器(array/plain object)里任意深度的引用同样输出 varName
+// live 传入 Set<attrs> 时,不在集合内的引用降级 null(实例已删 = 悬空引用,
+// 写 varName 会 ReferenceError 整图无法加载;与 edges 悬空 target 降级口径一致)。
 // 环/超深(>8)降级 null,保证序列化不炸;非 plain object(Date 等)走 JSON.stringify 旧行为。
 // 不做这一步的话:panel 一编辑 → syncCodeFromRuntime → 引用被 JSON 化成副本 → 重载后探测边消失。
-export function formatValue(v) {
-  return _formatValue(v, 0, new Set())
+export function formatValue(v, live) {
+  return _formatValue(v, 0, new Set(), live)
 }
 
-function _formatValue(v, depth, seen) {
+function _formatValue(v, depth, seen, live) {
   if (typeof v === 'string') {
-    const escaped = v.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n')
-    return "'" + escaped + "'"
+    return "'" + _escapeSingle(v) + "'"
   }
   if (v === null) return 'null'
   if (v === undefined) return 'undefined'
   if (typeof v !== 'object') return String(v)
-  if (v.__instId && typeof v.__instId.varName === 'string') return v.__instId.varName
+  if (v.__instId && typeof v.__instId.varName === 'string') {
+    if (live && !live.has(v)) return 'null'
+    return v.__instId.varName
+  }
   const proto = Object.getPrototypeOf(v)
   if (!Array.isArray(v) && proto !== Object.prototype && proto !== null) return JSON.stringify(v)
   if (depth >= 8 || seen.has(v)) return 'null'
   seen.add(v)
   let out
   if (Array.isArray(v)) {
-    out = '[' + v.map(x => _formatValue(x, depth + 1, seen)).join(', ') + ']'
+    out = '[' + v.map(x => _formatValue(x, depth + 1, seen, live)).join(', ') + ']'
   } else {
     const entries = Object.keys(v)
       .filter(k => !k.startsWith('__'))
-      .map(k => (isValidIdentifier(k) ? k : quoteKey(k)) + ': ' + _formatValue(v[k], depth + 1, seen))
+      .map(k => (isValidIdentifier(k) ? k : quoteKey(k)) + ': ' + _formatValue(v[k], depth + 1, seen, live))
     out = entries.length ? '{ ' + entries.join(', ') + ' }' : '{}'
   }
   seen.delete(v)

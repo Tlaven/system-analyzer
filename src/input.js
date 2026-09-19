@@ -234,6 +234,8 @@ function buildEmptyClassSource(className) {
 function buildCopyBlock(srcInst, newVar) {
   const cls = state.classes[srcInst.className]
   const clsAttrs = (cls && cls.attrs) || {}
+  // 悬空引用(实例已删)序列化降级 null,与 serializeCode 同口径
+  const liveAttrs = new Set(state.runtimeInstances.map(i => i.attrs))
   const lines = [`const ${newVar} = GraphStarter.add(${srcInst.className}, ${JSON.stringify(newVar)})`]
   for (const key of Object.keys(srcInst.attrs)) {
     if (key.startsWith('__')) continue
@@ -241,14 +243,14 @@ function buildCopyBlock(srcInst, newVar) {
     const defaultVal = clsAttrs[key]
     const curVal = srcInst.attrs[key]
     if (!_equal(defaultVal, curVal)) {
-      lines.push(`${newVar}.${key} = ${formatValue(curVal)}`)
+      lines.push(`${newVar}.${key} = ${formatValue(curVal, liveAttrs)}`)
     }
   }
   // edges 数组复制（target 引用原样保留——指向相同目标实例）
   const edges = srcInst.attrs.edges
   if (Array.isArray(edges) && edges.length > 0) {
     const items = edges.map(e => {
-      const tgtVar = (e && e.target && e.target.__instId)
+      const tgtVar = (e && e.target && e.target.__instId && liveAttrs.has(e.target))
         ? e.target.__instId.varName
         : 'null'
       const desc = (e && e.description != null) ? e.description : ''

@@ -76,7 +76,7 @@ class Processor {
 
 ### 核心规则
 
-- 节点 = RuntimeInstance(varName 是身份,由 `GraphStarter.add()` 内部自动生成 `<ClassName>_<n>`,或第二参数 explicitName 覆盖)
+- 节点 = RuntimeInstance(varName 是身份,由 `GraphStarter.add()` 内部自动生成 `<ClassName>_<n>`,或第二参数 explicitName 覆盖;explicitName 必须是合法标识符——字母/中文/`$`/`_` 开头,不能含空格或 `-`,否则序列化无法生成 `const` 绑定)
 - 多实例共享 class(同一个 class 可以 add 多次)
 - **3 个 class field(实例级,无 static 前缀)**:
   - `description` (string):class 默认描述
