@@ -13,7 +13,7 @@ import { state } from './state.js'
 import { render } from './renderer.js'
 import { pushUndo } from './editor.js'
 import { applyLayout, fitToView, spreadUnpositioned } from './physics.js'
-import { toB64 } from './utils.js'
+import { toB64, buildAICopyText } from './utils.js'
 import { runSource, serializeCode } from './codegraph.js'
 import { isSourceCodeProgrammatic, classifySource } from './parser.js'
 import { DEFAULT_BOOTSTRAP } from './bootstrap.js'
@@ -309,6 +309,15 @@ export function shareURL() {
   navigator.clipboard.writeText(url)
     .then(() => alert('分享链接已复制到剪贴板（' + enc.length + ' 字符）'))
     .catch(() => prompt('复制此链接：', url))
+}
+
+// ADR-009:复制给 AI 的代码块(标记 + 围栏),与分享链接(URL,人类)职责分离。
+// 用 state.sourceCode 而不是 serializeCode(state):Code 模式的方法体不能被重建掉。
+export function copyForAI() {
+  const text = buildAICopyText(state.sourceCode, Date.now())
+  navigator.clipboard.writeText(text)
+    .then(() => alert('已复制给 AI 的代码块（' + text.length + ' 字符）'))
+    .catch(() => prompt('复制以下内容给 AI：', text))
 }
 
 // ============ Panel 触发：runtimeInstances → sourceCode 序列化 + 持久化 ============

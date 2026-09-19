@@ -528,3 +528,24 @@ export function isBodyEmpty(body) {
   const stripped = body.replace(/\/\/.*$/gm, '').replace(/\s/g, '')
   return !stripped || stripped === 'returnnull' || stripped === 'returnundefined'
 }
+
+// ============================================================
+// ADR-009 AI 传输契约:代码块主通道的文本工具
+// ============================================================
+
+// 剥离 AI 输出常见的包装:```围栏 + 首行 `// sa-edit: <时间戳>` 标记。
+// 只剥"包住全文"的围栏(块内字符串里的 ``` 不受影响);标记只剥首行。
+export function stripCodeBlock(text) {
+  let t = String(text || '').trim()
+  const fence = t.match(/^```[^\n]*\n([\s\S]*?)\n?```$/)
+  if (fence) t = fence[1]
+  t = t.replace(/^\s*\/\/\s*sa-edit:[^\n]*\n?/, '')
+  return t
+}
+
+// "复制给 AI"的文本:围栏代码块,首行 sa-edit 标记(版本发散检测)。
+// 标记不存进源码本身,每次复制时由调用方传时间戳生成。
+export function buildAICopyText(sourceCode, ts) {
+  const body = String(sourceCode || '').replace(/\s+$/, '')
+  return '```js\n// sa-edit: ' + ts + '\n' + body + '\n```\n'
+}

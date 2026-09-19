@@ -202,6 +202,9 @@ Code 模式交互:
     → debounce 400ms
     → commitCode() → runSource + save + render
     → Code → UI 切换检测程序化结构,含则 confirm 反向构建
+
+AI 传输:
+  复制给 AI → buildAICopyText(utils.js) 生成带 sa-edit 标记的代码块
 ```
 
 ---

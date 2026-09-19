@@ -20,6 +20,7 @@
 - **Canvas 渲染** — 三档信息密度 / 多种布线 / 多种布局
 - **中文/Unicode 全栈支持** — class name、attr key、varName 都可以是中文
 - **AI 自发现** — 通过 `/llms.txt` 入口契约被 AI 跨对话/跨项目复用,无需 manual 引导
+- **AI 传输双通道(ADR-009)** —— 默认 sourceCode 代码块("粘贴源码…"导入,自动剥围栏/标记)+ "复制给 AI"一键回传;URL 降级为小图快路径与人类分享
 - **零后端** — localStorage + URL hash 分享,纯静态托管
 
 ## 快速开始

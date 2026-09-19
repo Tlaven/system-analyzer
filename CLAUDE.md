@@ -112,6 +112,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 - **引用值 attr 序列化为 varName(ADR-006)**——`formatValue` 对带 `__instId` 的对象输出目标 varName,容器内任意深度递归保持引用身份;环/超深(>8)降级 `null`。**不允许**退回 JSON 化副本(会让引用静默变拷贝、探测边跨 session 消失)。
 - **序列化源是作者态快照(ADR-007)**——`serializeCode` 只写 `state.authorAttrs`(runSource 捕获、UI 编辑写穿);方法体/transform/stepAll 的演化值不进 sourceCode,reset 恢复作者态。新增改 attrs 的 UI 入口必须同步写穿(`src/author.js`)。
 - **外部导入的 sourceCode 必须先过 `classifySource`(ADR-008)**——declarative 免确认,programmatic/unknown 弹阻断式 confirm;闸门唯一咽喉是 `importSource`(返回布尔,取消不载入),localStorage 载入不过闸。dist 必须携带 meta CSP(`connect-src 'none'`),不得引入运行时网络请求。
+- **AI↔人往返的主通道是 sourceCode 代码块(ADR-009)**——"复制给 AI"输出首行带 sa-edit 标记;粘贴导入必须容忍并剥离围栏与标记行;URL 是可选快路径与人类分享载体,不是唯一通道。
 
 ## Documentation
 

@@ -1366,6 +1366,43 @@ console.log('\n测试 48：ADR-008 分享链接取消载入 → 回退本地图'
   check('闸门 confirm 出现', dialogMsgs.some(m => m.includes('可执行代码')), dialogMsgs)
 }
 
+const PASTE_SAMPLE = `class P {
+  description = '粘贴'
+  attrs = { v: 7 }
+}
+const P_1 = GraphStarter.add(P, 'P_1')`
+
+console.log('\n测试 49：ADR-009 粘贴导入(围栏+sa-edit 标记剥离)')
+{
+  const pasted = '```js\n// sa-edit: 1234567890\n' + PASTE_SAMPLE + '\n```'
+  await page.evaluate((text) => {
+    window.__sa_test.modalPrefill = { source: text }
+    window.pasteSource()
+  }, pasted)
+  await new Promise(r => setTimeout(r, 300))
+  const r = await page.evaluate(() => ({
+    title: window.state.graphTitle,
+    src: window.state.sourceCode,
+    count: window.state.runtimeInstances.length,
+    v: window.state.runtimeInstances[0]?.attrs.v,
+  }))
+  check('粘贴导入成功(title=粘贴导入)', r.title === '粘贴导入', r.title)
+  check('围栏与 sa-edit 标记被剥离', !r.src.includes('```') && !r.src.includes('sa-edit'), r.src.slice(0, 60))
+  check('实例载入且属性正确', r.count === 1 && r.v === 7, r)
+}
+
+console.log('\n测试 50：ADR-009 菜单入口与复制文本格式')
+{
+  const menu = await page.evaluate(() => ({
+    paste: !!document.querySelector('[onclick="pasteSource()"]'),
+    copyAI: !!document.querySelector('[onclick="copyForAI()"]'),
+  }))
+  check('菜单含"粘贴源码…"', menu.paste, menu)
+  check('菜单含"复制给 AI"', menu.copyAI, menu)
+  const text = await page.evaluate(() => window.__sa_test.buildAICopyText(window.state.sourceCode, 42))
+  check('复制文本 = 标记首行 + 围栏', text.startsWith('```js\n// sa-edit: 42\n') && text.trimEnd().endsWith('```'), text.slice(0, 40))
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

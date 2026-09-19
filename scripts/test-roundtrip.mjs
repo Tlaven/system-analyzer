@@ -4,6 +4,7 @@
 // v0.9 vs v0.8：删除 edges 字段（边不再在 class 声明）
 import { scanClass } from '../src/scanner.js'
 import { classifySource } from '../src/parser.js'
+import { stripCodeBlock, buildAICopyText } from '../src/utils.js'
 
 let pass = 0, fail = 0
 function check(name, cond, detail) {
@@ -191,6 +192,21 @@ const A_1 = GraphStarter.add(A, 'A_1')`) === 'declarative')
 class A { attrs = { v: 1 } }`) === 'unknown')
 
   check('空串 → declarative', classifySource('') === 'declarative')
+}
+
+// ==================================================================
+console.log('\n=== 区 9：AI 传输文本工具(ADR-009)===')
+{
+  const src = "class A { attrs = { v: 1 } }\nconst A_1 = GraphStarter.add(A, 'A_1')"
+  check('stripCodeBlock 剥围栏', stripCodeBlock('```js\n' + src + '\n```') === src)
+  check('stripCodeBlock 剥标记', stripCodeBlock('// sa-edit: 123\n' + src) === src)
+  check('stripCodeBlock 围栏+标记', stripCodeBlock('```js\n// sa-edit: 123\n' + src + '\n```') === src)
+  check('stripCodeBlock 无围栏原样', stripCodeBlock(src) === src)
+  check('stripCodeBlock 块内 ``` 不误剥', stripCodeBlock('```js\n' + src + '\nconst s = "```"\n```') === src + '\nconst s = "```"')
+  const text = buildAICopyText(src, 42)
+  check('buildAICopyText 首行标记', text.startsWith('```js\n// sa-edit: 42\n'))
+  check('buildAICopyText 尾部围栏', text.endsWith('\n```\n'))
+  check('往返:build → strip 还原源码', stripCodeBlock(text) === src)
 }
 
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)

@@ -3,13 +3,13 @@ import { render, updateTooltip } from './renderer.js'
 import { pushUndo, undo, selectInstance, selectEdge, deselectAll, delNode, delEdge } from './editor.js'
 window.selectInstance = selectInstance
 import { startPhysics, stopPhysics, applyLayout, fitToView } from './physics.js'
-import { importJSON, save, onExport, onNew, shareURL, resetRuntime, syncCodeFromRuntime, wrapInstance, wrapAllInstances } from './io.js'
+import { importJSON, save, onExport, onNew, shareURL, copyForAI, resetRuntime, syncCodeFromRuntime, wrapInstance, wrapAllInstances } from './io.js'
 import { deriveEdges, invalidateEdges } from './codegraph.js'
 import { toggleCodeView, commitCodeNow, setCodeViewReadOnly } from './codeview.js'
 import { loadConfig, saveConfig, applyTheme } from './config.js'
 import { showNodePanel, showEdgePanel, refreshSparklines } from './panel.js'
 import { showModal } from './modal.js'
-import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName } from './utils.js'
+import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName, stripCodeBlock, buildAICopyText } from './utils.js'
 import { stepAll, propagate, runTransforms } from './engine.js'
 import { splitSource, isSourceCodeProgrammatic } from './parser.js'
 import { runSource, _equal, formatValue } from './codegraph.js'
@@ -41,6 +41,23 @@ window.onExport = onExport
 window.onNew = onNew
 window.fitToView = fitToView
 window.shareURL = shareURL
+window.copyForAI = copyForAI
+window.__sa_test.buildAICopyText = buildAICopyText
+window.pasteSource = async function() {
+  const vals = await showModal({
+    title: '粘贴源码导入',
+    fields: [{ name: 'source', label: 'sourceCode(可直接粘贴 AI 输出的代码块,围栏与 sa-edit 标记会自动剥离)', type: 'textarea' }],
+    submitLabel: '载入',
+  })
+  if (!vals) return
+  const code = stripCodeBlock(vals.source)
+  if (!code) return
+  try {
+    pushUndo()
+    const ok = importJSON({ sourceCode: code, title: '粘贴导入' })
+    if (ok) { save(); render() }
+  } catch (err) { alert('导入失败：' + err.message) }
+}
 window.applyLayout = applyLayout
 window.delNode = n => delNode(n)
 window.delEdge = e => delEdge(e)

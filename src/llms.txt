@@ -10,13 +10,21 @@ System Analyzer 是一个 web 端的**系统关系可视化工具**。它能让�
 
 ## 你该怎么用这个工具
 
-当用户聊到"某个系统是怎样运作的"、"帮我画个 X 的关系图"、"模拟一下 Y 的演化"这类需求时,你可以:
+当用户聊到"某个系统是怎样运作的""帮我画个 X 的关系图""模拟一下 Y 的演化"这类需求时:
 
-1. **按下方 sourceCode 格式构造 graph**(3 个 class field + 实例级 edges,可选 transform 公式)
-2. **编码到 URL hash**(UTF-8 safe base64)
-3. **输出 URL 给用户**,用户点开就能看到可视化
+1. **按下文 sourceCode 格式构造 graph**(3 个 class field + 实例级 edges,可带 transform 公式)
+2. **默认输出一段 sourceCode 代码块**(围栏 ```js)——用户会粘贴进工具的"文件 → 粘贴源码…"导入
+3. **（可选快路径）** 如果图很小(编码后 < 约 4000 字符)且你有把握,可以附一个 URL;没有把握就不要附,代码块永远可用
+4. **用户可能回传一段代码块**(首行有 `// sa-edit: <时间戳>` 标记)——读代码块,并回显你基于哪个标记修改(防版本发散)
 
-用户也可以在 UI 上手动调整后**复制新 URL 回对话**——你 fetch 这个 URL,解码 hash,就能看到用户修改后的 code,按需重新填实现。
+### 不要 fetch 用户给的 URL
+
+URL 的状态在 `#` 之后,HTTP 请求不携带 fragment——fetch 只会拿到空壳。
+用户贴 URL 时,直接从**消息文本**里取 `#` 后的 base64 解码;或者请用户改用"复制给 AI"按钮给代码块。
+
+### 含方法体的图会有执行确认
+
+含方法体/控制流的图,用户在载入时会看到一次确认弹窗(这是安全闸门,不是错误)。这是预期行为。
 
 ## 当前模型:sourceCode 是真相源
 
@@ -107,7 +115,7 @@ class Processor {
 
 graph 的存储格式是 **一段 JS sourceCode**。你的核心工作:
 
-1. **读取 URL 里的 sourceCode**(base64 → JSON → `.sourceCode`)
+1. **读取用户消息里的 sourceCode**(默认是代码块;若是 URL,取 `#` 后的 base64 → JSON → `.sourceCode`,不要 fetch)
 2. **判断当前模式**:UI 模式(无方法体)/ Code 模式(含方法体)
 3. **读懂 3 个 class field(description / name / attrs)+ 实例级 attrs.edges**,理解关系语义
 4. **修改 sourceCode**:
@@ -115,11 +123,13 @@ graph 的存储格式是 **一段 JS sourceCode**。你的核心工作:
    - 或在启动段加 `GraphStarter.add(ClassName)` 增加实例(varName 自动生成)
    - 或追加 `X.edges = [{ target: Y, description: '...' }]` 建立连接
    - 或在边上加 `transform` 公式:`{ target: Y, description: '...', transform: "target['out'] = source['in'] * 0.5" }`——改上游 attr 自动重算下游,比写方法体轻
-5. **输出新 URL**(含更新后的 sourceCode)
+5. **输出新的 sourceCode 代码块**(默认;仅小图且有把握时附 URL),并回显 sa-edit 标记
 
 人写 `description` + 启动段连接 = 给你写需求文档;你填方法体 = 按需求实现。
 
-## URL 编码
+## 附:URL 编码(可选快路径)
+
+> 仅在你有把握可靠编码、且图较小时使用。默认请输出代码块。
 
 ```js
 function toB64(str) {

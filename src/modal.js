@@ -60,6 +60,8 @@ export function showModal({ title, fields, submitLabel = '确定' }) {
         input = document.createElement('input')
         input.type = 'text'
         input.setAttribute('list', listId)
+      } else if (f.type === 'textarea') {
+        input = document.createElement('textarea')
       } else {
         input = document.createElement('input')
         input.type = 'text'
@@ -129,7 +131,7 @@ export function showModal({ title, fields, submitLabel = '确定' }) {
 
     // Enter 提交、Esc 取消
     box.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); attemptSubmit() }
+      if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); attemptSubmit() }
       else if (e.key === 'Escape') { e.preventDefault(); finish(null) }
     })
 

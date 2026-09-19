@@ -6,6 +6,7 @@
 
 ### Added
 
+- **AI 传输契约(ADR-009)**:往返主通道改为 sourceCode 代码块("粘贴源码…"自动剥围栏与 sa-edit 标记 + "复制给 AI"一键回传);URL 降级为 <4k 快路径;llms.txt 重写(不要 fetch URL、执行确认是预期);utils.stripCodeBlock / buildAICopyText 纯函数 + Node 单测 8 项 + e2e 49-50
 - **外部导入执行闸门(ADR-008)**:`classifySource` 三值分类(声明式/程序化/未知)+ `importSource` 阻断式确认(取消不载入、URL 回退本地图)+ meta CSP(`connect-src 'none'` 锁 exfil 出口);测试:分类器 18 项 + e2e 4 例 + storm "序列化产物必为 declarative"不变量
 - **执行观测 MVP(ADR-005,roadmap A1–A3)**:
   - **A1 属性时序记录**——`state.traces[varName][attr] = {tick, value}[]`,环形缓冲 200,`stepAll` 每 tick 写入(只记数值型 own attrs);panel 数值属性行内嵌 mini sparkline,连播时原地重绘不重建 panel
