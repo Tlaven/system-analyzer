@@ -290,3 +290,41 @@ minimal 模式下，边可能被路径上的其他圆形节点遮挡。这是**�
 AI diff 视图 / class 图例面板 / weight 流量粗细（模型语义未定） / 坐标数字 / 执行历史 timeline（时序哲学未定）。
 
 设计前提（已兑现）：全部新通道**不扩模型**——从现有 runtime 对象（edge.transform / edge.description / inst.attrs / cls.methods / state.editMode）直接可读；净效应 = 5 新通道 + 2 假 affordance 清除。
+
+---
+
+## 11. 影响模式（已实现，ADR-010）
+
+> 验收第一问后半的落地:选中节点 → 上游/下游闭包聚焦 + panel 文字列表。纯查询视图,不改模型(不变量 33-35)。
+
+### 语义
+
+- **焦点 = `state.selNode`**;方向 = `state.influenceDir`(`up` / `down` / `both`,默认 both,仅会话)
+- **闭包来源**:声明边 `u→v` 正向影响;**探测边 `u⇢v` 反向**(u 引用 v ⇒ v 影响 u——依赖方向,与画布箭头相反);同对已有声明边 `u→v` 时该探测边不参与(差集口径与探测边渲染一致)
+- 实现:`src/influence.js` 的 `computeInfluence(state, varName, direction)`,纯函数 + 身份键记忆化(缓存键含 deriveEdges/deriveProbeEdges 的缓存数组身份)
+
+### 画布分层
+
+| 元素 | 表现 |
+|---|---|
+| 焦点 / 直接邻居 | 全亮;直接邻居 accent 描边 |
+| 间接(闭包内非直接) | alpha 0.85 |
+| 不可达 | alpha 0.35(与 hover dim 同值) |
+| 参与路径的声明边 | 全亮 + 线宽 3.0(与 hover 高亮一致) |
+| 未参与声明边 | DIM 0.35 |
+| 参与路径的探测边 | alpha 0.85 + 线宽 1.8 |
+| 未参与探测边 | alpha 0.15 |
+
+- 方向单选时另一侧自然落入"不可达"被 dim——这是方向切换的隔离效果
+- 优先级:影响激活时**覆盖**搜索 dim;hover dim 与影响互斥(现有条件 `!state.selNode`);环红虚线、执行脉冲不受影响
+
+### Panel 影响区(实例模式,Code 模式只读也显示)
+
+- 标题 `影响` + 三段切换 `上游 | 下游 | 双向`(`window.setInfluenceDir`)
+- 分节:`上游(直接 2 · 间接 5)` / `下游(...)`;只列**直接**邻居(间接靠画布 + 计数);空态"无直接依赖"
+- 行 = 对方名称 + 来源注:声明边显示 description;探测边显示 `引用: <field> ×N`
+- 点击行 → `window.selectInfluenceTarget(varName)` → 选中对方(panel 切换、焦点转移,不移动视口)
+
+### 明确不做
+
+属性级列表 / 视口自动移动 / 影响高亮开关 / 路径枚举与中心度等图分析 / 方向偏好持久化。
