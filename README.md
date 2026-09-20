@@ -17,6 +17,7 @@
 - **边级 transform 表达式** — 边上写 JS 语句片段,改上游 attr 自动重算下游,像 Excel formula(详见 [ADR-003](docs/decisions/adr-003-edge-transform-expressions.md))
 - **执行观测** — 步进 / 连播推进 tick,数值属性历史记入 panel sparkline,环边红色虚线标记(详见 [ADR-005](docs/decisions/adr-005-execution-observation.md))
 - **双层边** — 声明边(作者意图,实线)+ 探测边(从运行时引用自动推得,虚线灰,同对收敛),未声明的隐式依赖可见(详见 [ADR-006](docs/decisions/adr-006-probe-edges-l1.md))
+- **影响解析** — 选中节点看上游/下游闭包(直接强/间接弱/不可达 dim,方向三选),panel 依赖列表带来源注与跳转;探测边按依赖方向参与(详见 [ADR-010](docs/decisions/adr-010-influence-analysis.md))
 - **Canvas 渲染** — 三档信息密度 / 多种布线 / 多种布局
 - **中文/Unicode 全栈支持** — class name、attr key、varName 都可以是中文
 - **AI 自发现** — 通过 `/llms.txt` 入口契约被 AI 跨对话/跨项目复用,无需 manual 引导
@@ -38,6 +39,7 @@ node scripts/test-codegraph.mjs    # 核心引擎单元测试(runSource/serializ
 node scripts/test-engine.mjs       # 执行观测单元测试(traces/环成员识别,无浏览器)
 node scripts/test-roundtrip.mjs    # scanner 静态分析单元测试(无浏览器)
 node scripts/test-skeleton.mjs     # 骨架验证(往返不动点 fuzz + 编辑风暴 + 边界钉子,无浏览器)
+node scripts/test-influence.mjs    # 影响解析单元测试(闭包/探测边反向/差集,无浏览器)
 node scripts/test-e2e.mjs          # puppeteer e2e(loads dist/index.html — MUST build first)
 ```
 

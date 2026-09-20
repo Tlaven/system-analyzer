@@ -15,6 +15,7 @@ import { splitSource, isSourceCodeProgrammatic } from './parser.js'
 import { runSource, _equal, formatValue } from './codegraph.js'
 import { deriveProbeEdges } from './probe.js'
 import { authorAttrsOf, markEdgesEdited } from './author.js'
+import { computeInfluence } from './influence.js'
 
 // 测试与调试钩子
 window.state = state
@@ -41,6 +42,24 @@ window.onExport = onExport
 window.onNew = onNew
 window.fitToView = fitToView
 window.shareURL = shareURL
+window.setInfluenceDir = function(dir) {
+  if (dir !== 'up' && dir !== 'down' && dir !== 'both') return
+  state.influenceDir = dir
+  if (state.selInstance) showNodePanel(state.selInstance)
+  render()
+}
+window.selectInfluenceTarget = function(varName) {
+  const inst = state.runtimeInstances.find(i => i.varName === varName)
+  if (!inst) return
+  window.selectInstance(inst)
+  showNodePanel(inst)
+}
+window.__sa_test.influence = function(varName, dir) {
+  const v = varName || (state.selNode && state.selNode.id)
+  if (!v) return null
+  const inf = computeInfluence(state, v, dir || state.influenceDir || 'both')
+  return { up: [...inf.up], down: [...inf.down], directUp: [...inf.directUp], directDown: [...inf.directDown] }
+}
 window.copyForAI = copyForAI
 window.__sa_test.buildAICopyText = buildAICopyText
 window.pasteSource = async function() {

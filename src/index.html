@@ -108,6 +108,11 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
 #add-node-btn:disabled{cursor:not-allowed;opacity:.4}
 .btn-copy{width:100%;padding:8px;background:var(--tbtn);border:1px solid var(--tbtnb);color:var(--tbtn-hc);border-radius:5px;cursor:pointer;font-size:13px;font-family:inherit;margin-bottom:6px;transition:background .15s}
 .btn-copy:hover{background:var(--tbtn-hbg);border-color:var(--tbtn-hb)}
+.inf-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:12px;color:var(--ifc)}
+.inf-row:hover{background:var(--tbtn-hbg)}
+.inf-row .inf-note{color:var(--flbl);font-size:11px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.inf-dir-toggle{display:flex;width:100%;box-sizing:border-box}
+.inf-dir-toggle .edit-mode-btn{flex:1;text-align:center}
 /* v0.7 Phase 3: panel segmented control + warning bar */
 .panel-mode-toggle{display:flex;width:100%;box-sizing:border-box}
 .panel-mode-toggle .edit-mode-btn{flex:1;text-align:center}

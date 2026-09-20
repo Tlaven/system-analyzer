@@ -1403,6 +1403,71 @@ console.log('\n测试 50：ADR-009 菜单入口与复制文本格式')
   check('复制文本 = 标记首行 + 围栏', text.startsWith('```js\n// sa-edit: 42\n') && text.trimEnd().endsWith('```'), text.slice(0, 40))
 }
 
+const INFL_SAMPLE = `class A { attrs = { v: 1, ref: null } }
+class B { attrs = { v: 0 } }
+class C { attrs = { v: 0 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+const B_1 = GraphStarter.add(B, 'B_1')
+const C_1 = GraphStarter.add(C, 'C_1')
+A_1.edges = [{ target: B_1, description: 'a→b' }]
+B_1.edges = [{ target: C_1, description: 'b→c' }]
+A_1.ref = C_1`
+
+console.log('\n测试 51：ADR-010 影响区(计数/来源注/闭包数据)')
+{
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: '影响测试' })
+    const a1 = window.state.runtimeInstances.find(i => i.varName === 'A_1')
+    window.showNodePanel(a1)
+    window.setPanelMode('instance')
+  }, INFL_SAMPLE)
+  await new Promise(r => setTimeout(r, 150))
+  const r = await page.evaluate(() => {
+    const body = document.getElementById('panel-body').innerText
+    const rows = [...document.querySelectorAll('.inf-row')].map(el => ({
+      name: el.querySelector('.inf-name').textContent,
+      note: el.querySelector('.inf-note').textContent,
+    }))
+    const inf = window.__sa_test.influence('A_1', 'both')
+    return {
+      hasToggle: !!document.querySelector('.inf-dir-toggle'),
+      upCount: body.includes('上游（直接 1 · 间接 1）'),
+      downCount: body.includes('下游（直接 1 · 间接 1）'),
+      rows,
+      inf,
+    }
+  })
+  check('影响区存在(三段切换)', r.hasToggle, r)
+  check('计数:上游 直接1·间接1 / 下游 直接1·间接1', r.upCount && r.downCount, r)
+  check('探测行 = C_1 引用: ref', r.rows.some(x => x.name === 'C_1' && x.note === '引用: ref'), r.rows)
+  check('声明行 = B_1 a→b', r.rows.some(x => x.name === 'B_1' && x.note === 'a→b'), r.rows)
+  check('闭包数据:up=[B_1,C_1] down=[B_1,C_1] directUp=[C_1] directDown=[B_1]',
+    r.inf && [...r.inf.up].sort().join() === 'B_1,C_1' && [...r.inf.down].sort().join() === 'B_1,C_1' &&
+    r.inf.directUp.join() === 'C_1' && r.inf.directDown.join() === 'B_1', r.inf)
+}
+
+console.log('\n测试 52：ADR-010 方向切换与列表跳转')
+{
+  await page.evaluate(() => window.setInfluenceDir('up'))
+  await new Promise(r => setTimeout(r, 100))
+  const r1 = await page.evaluate(() => ({
+    dir: window.state.influenceDir,
+    body: document.getElementById('panel-body').innerText,
+  }))
+  check('切到上游:state.influenceDir=up', r1.dir === 'up', r1.dir)
+  check('切到上游:下游节消失', !r1.body.includes('下游（直接'), r1.body.slice(0, 200))
+  await page.evaluate(() => { document.querySelector('.inf-row').click() })
+  await new Promise(r => setTimeout(r, 100))
+  const r2 = await page.evaluate(() => ({
+    sel: window.state.selInstance && window.state.selInstance.varName,
+    panelId: document.querySelector('.panel-id') && document.querySelector('.panel-id').textContent,
+    dir: window.state.influenceDir,
+  }))
+  check('点行 → 选中并切到 C_1(上游邻居)', r2.sel === 'C_1' && r2.panelId === 'C_1', r2)
+  check('方向保持 up', r2.dir === 'up', r2.dir)
+  await page.evaluate(() => window.setInfluenceDir('both'))
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

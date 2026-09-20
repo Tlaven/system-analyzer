@@ -4,6 +4,7 @@ import { deriveEdges, nodeIndex, _equal } from './codegraph.js'
 import { getCycleMembers } from './engine.js'
 import { deriveProbeEdges } from './probe.js'
 import { authorAttrsOf } from './author.js'
+import { computeInfluence } from './influence.js'
 
 // 探测边端点:从节点中心沿连线方向与矩形边界求交(medium/full;minimal 走 edgePts 圆周)
 function rectExit(n, other) {
@@ -126,6 +127,17 @@ export function render() {
   const DIM = 0.35
   const isDimmed = () => hoverConnectedEdgeIds !== null
 
+  // ADR-010 影响模式:选中节点 = 焦点,闭包分层(直接强/间接弱/不可达 dim)。
+  // 与 hover dim 互斥(上方条件 !state.selNode);搜索 dim 在影响激活时让位。
+  const _inf = state.selNode ? computeInfluence(state, state.selNode.id, state.influenceDir || 'both') : null
+  const _infDirect = (id) => !!(_inf && (_inf.directUp.has(id) || _inf.directDown.has(id)))
+  const _infAlpha = (id) => {
+    if (!_inf) return 1
+    if (id === state.selNode.id) return 1
+    if (!_inf.up.has(id) && !_inf.down.has(id)) return DIM
+    return _infDirect(id) ? 1 : 0.85
+  }
+
   // 多边同对的并行由端口分配处理（edgePts → getPortPos → computeNodePorts）
   const _allEdges = deriveEdges(state)
   const _byId = nodeIndex(state)
@@ -151,10 +163,11 @@ export function render() {
     let p1, p2
     if (config.infoLevel === 'minimal') ({ p1, p2 } = edgePts(s, t, pe))
     else { p1 = rectExit(s, t); p2 = rectExit(t, s) }
+    const _pst = _inf ? _inf.probeState.get(pe.id) : null
     ctx.save()
     ctx.strokeStyle = pc.text3
-    ctx.globalAlpha = 0.5
-    ctx.lineWidth = 1.4
+    ctx.globalAlpha = _inf ? (_pst ? 0.85 : 0.15) : 0.5
+    ctx.lineWidth = _inf && _pst ? 1.8 : 1.4
     ctx.setLineDash([4, 4])
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke()
     ctx.setLineDash([])
@@ -171,7 +184,7 @@ export function render() {
       ctx.font = '10px "Microsoft YaHei",sans-serif'
       const txt = truncateText(ctx, label, 120)
       const tw = ctx.measureText(txt).width
-      ctx.globalAlpha = 0.7
+      ctx.globalAlpha = _inf ? (_pst ? 0.7 : 0.15) : 0.7
       ctx.fillStyle = pc.bg
       ctx.fillRect(mx - tw / 2 - 3, my - 8, tw + 6, 13)
       ctx.fillStyle = pc.text3
@@ -190,14 +203,16 @@ export function render() {
     const es2 = config.edgeStyle
     const isCurve = es2 === 'curve'
     const isHighlighted = isDimmed() && hoverConnectedEdgeIds.has(e.id)
+    const isInfEdge = _inf && _inf.edgeState.has(e.id)
     // ADR-005 A3:环上边(两端都是真环成员)红色虚线覆盖标记
     const isCycleEdge = _cycleMembers.has(e.source_instance) && _cycleMembers.has(e.target_instance)
     const ec = isSel ? es.sel : (isHovered ? es.sel : es.color)
     ctx.strokeStyle = ec
-    ctx.lineWidth = isSel ? 2.5 : (isHovered || isHighlighted) ? 3.0 : 1.8
+    ctx.lineWidth = isSel ? 2.5 : (isHovered || isHighlighted || isInfEdge) ? 3.0 : 1.8
     // alpha：hoverNode dim 时相关边全实、无关边 DIM；否则 curve 默认半透明（sel/hover 时全实），其他模式全实
     let alpha = 1.0
-    if (isDimmed()) alpha = isHighlighted ? 1.0 : DIM
+    if (_inf) alpha = isInfEdge ? 1.0 : DIM
+    else if (isDimmed()) alpha = isHighlighted ? 1.0 : DIM
     else if (isSel || isHovered) alpha = 1.0
     else if (isCurve) alpha = 0.55
     ctx.globalAlpha = alpha
@@ -397,7 +412,8 @@ export function render() {
     const isSearchMatch = isSearchActive && searchMatch
     const matchAlpha = isSearchActive && !searchMatch ? 0.25 : 1
     const isRelated = !isDimmed() || isHov || isNbr
-    if (matchAlpha < 1) ctx.globalAlpha = matchAlpha
+    if (_inf) ctx.globalAlpha = _infAlpha(n.id)
+    else if (matchAlpha < 1) ctx.globalAlpha = matchAlpha
     else if (isDimmed() && !isRelated) ctx.globalAlpha = DIM
     const vis = n.visual || {}
     const customBg = vis.color
@@ -422,8 +438,9 @@ export function render() {
     ctx.shadowBlur = 0
 
     const nb = pc.nodeBorder, nbAccent = pc.accent
-    ctx.strokeStyle = isSel ? nbAccent : (isHov || isNbr || isSearchMatch) ? nbAccent : nb
-    ctx.lineWidth = isSel ? 2 : (isHov || isNbr || isSearchMatch) ? 2 : 1.2
+    const isInfDir = _infDirect(n.id)
+    ctx.strokeStyle = isSel ? nbAccent : (isHov || isNbr || isSearchMatch || isInfDir) ? nbAccent : nb
+    ctx.lineWidth = isSel ? 2 : (isHov || isNbr || isSearchMatch || isInfDir) ? 2 : 1.2
     ctx.stroke()
 
     // 显示通道 2:方法体存在圆点(三档通用角标;数据 = cls.methods.length > 0)

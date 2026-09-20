@@ -143,6 +143,7 @@ export const state = {
   // v0.7 双模式
   editMode: 'ui',            // 'ui' | 'code'
   panelMode: {},             // { [varName]: 'class' | 'instance' } — UI 临时状态
+  influenceDir: 'both',      // ADR-010 影响方向:'up' | 'down' | 'both'(会话内,不持久化)
 
   // 视图（保留为顶层，方便访问）
   viewX: 0, viewY: 0, viewScale: 1,

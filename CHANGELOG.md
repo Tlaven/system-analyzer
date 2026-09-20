@@ -6,6 +6,7 @@
 
 ### Added
 
+- **影响解析(ADR-010)**:选中节点 → 上游/下游闭包画布聚焦(直接强/间接弱/不可达 dim;方向三选默认双向)+ panel 影响区(直接/间接计数、来源注 description / field-path ×N、点行跳转);探测边按**依赖方向**参与(引用方被影响),同对差集口径;新 `src/influence.js` 纯函数 + 身份键记忆化;新增第六套测试 `scripts/test-influence.mjs`(27 项)+ e2e 51-52
 - **AI 传输契约(ADR-009)**:往返主通道改为 sourceCode 代码块("粘贴源码…"自动剥围栏与 sa-edit 标记 + "复制给 AI"一键回传);URL 降级为 <4k 快路径;llms.txt 重写(不要 fetch URL、执行确认是预期);utils.stripCodeBlock / buildAICopyText 纯函数 + Node 单测 8 项 + e2e 49-50
 - **外部导入执行闸门(ADR-008)**:`classifySource` 三值分类(声明式/程序化/未知)+ `importSource` 阻断式确认(取消不载入、URL 回退本地图)+ meta CSP(`connect-src 'none'` 锁 exfil 出口);测试:分类器 18 项 + e2e 4 例 + storm "序列化产物必为 declarative"不变量
 - **执行观测 MVP(ADR-005,roadmap A1–A3)**:

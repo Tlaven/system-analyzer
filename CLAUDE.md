@@ -35,10 +35,11 @@ node scripts/test-codegraph.mjs        # v0.9 核心引擎单元测试(runSource
 node scripts/test-engine.mjs           # 执行观测单元测试(traces 记录/环形缓冲 + 环成员识别,无浏览器)
 node scripts/test-roundtrip.mjs        # scanner 静态分析单元测试(无浏览器)
 node scripts/test-skeleton.mjs         # 骨架验证(往返不动点 fuzz + 编辑风暴 + 边界钉子,无浏览器)
+node scripts/test-influence.mjs        # 影响解析单元测试(闭包/探测边反向/差集,无浏览器)
 node scripts/test-e2e.mjs              # puppeteer, loads dist/index.html — MUST `npm run build` first
 ```
 
-No test runner, lint, or typecheck. Verification is manual in the browser, plus the five `.mjs` scripts above.
+No test runner, lint, or typecheck. Verification is manual in the browser, plus the six `.mjs` scripts above.
 
 ## 架构
 
@@ -46,7 +47,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 
 > **详见 [docs/architecture.md](docs/architecture.md)(L2 架构层)** —— 模块清单、双模式编辑 + 实例级 edges 模型、主流程叙述、关键架构决策、架构级不变量。
 
-一句话概要:sourceCode 字符串 → `runSource` 派生 runtimeInstances → `deriveEdges` 派生边视图 → Canvas 渲染;边上有 transform 时 `evalTransforms` 在渲染前求值(`propagate` / `runTransforms` 两个入口)。UI 模式 panel 编辑可双向同步回 sourceCode;Code 模式 codeview 编辑触发 `runSource` 重建。执行观测:`stepAll` 推进 tick 并写 `state.traces`,panel 属性行画 sparkline,环边红色虚线标记(ADR-005)。双层边:探测边从 attrs 引用推得(虚线灰,同对收敛),与声明边(实线)分层渲染(ADR-006)。
+一句话概要:sourceCode 字符串 → `runSource` 派生 runtimeInstances → `deriveEdges` 派生边视图 → Canvas 渲染;边上有 transform 时 `evalTransforms` 在渲染前求值(`propagate` / `runTransforms` 两个入口)。UI 模式 panel 编辑可双向同步回 sourceCode;Code 模式 codeview 编辑触发 `runSource` 重建。执行观测:`stepAll` 推进 tick 并写 `state.traces`,panel 属性行画 sparkline,环边红色虚线标记(ADR-005)。双层边:探测边从 attrs 引用推得(虚线灰,同对收敛),与声明边(实线)分层渲染(ADR-006)。影响解析:选中节点 → 上游/下游闭包高亮 + panel 依赖列表(声明边正向、探测边反向,ADR-010)。
 
 ---
 

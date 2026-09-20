@@ -16,6 +16,7 @@ import { getInstanceAttrKeys } from './attrkeys.js'
 import { _equal, invalidateEdges } from './codegraph.js'
 import { setAuthorAttr, deleteAuthorAttr, markEdgesEdited } from './author.js'
 import { showModal } from './modal.js'
+import { computeInfluence, influenceRows } from './influence.js'
 
 const $ = s => document.querySelector(s)
 const panel = $('#panel')
@@ -475,6 +476,45 @@ export function showNodePanel(inst, highlightRef) {
     if (!codeMode) {
       html += '<button class="btn-add-prop" onclick="addInstanceEdge()" style="margin-top:4px">+ 加边</button>'
     }
+  }
+
+  // ADR-010 影响区（实例模式；Code 模式只读也显示——纯查询视图）
+  if (cls && !isType) {
+    const dir = state.influenceDir || 'both'
+    const inf = computeInfluence(state, inst.varName, dir)
+    const dirBtn = (v, label) => '<button class="edit-mode-btn' + (dir === v ? ' active' : '') + '" onclick="setInfluenceDir(\'' + v + '\')">' + label + '</button>'
+    html += '<div class="prop-title" style="margin-top:12px">影响</div>' +
+      '<div class="edit-mode-group inf-dir-toggle" style="margin:4px 0 8px">' +
+      dirBtn('up', '上游') + dirBtn('down', '下游') + dirBtn('both', '双向') + '</div>'
+    const nameOf = (varName) => {
+      const n = state.runtimeInstances.find(i => i.varName === varName)
+      if (!n) return varName
+      const c = state.classes[n.className]
+      return n.attrs.name || (c && c.name) || varName
+    }
+    const section = (side, title) => {
+      const closure = side === 'up' ? inf.up : inf.down
+      const direct = side === 'up' ? inf.directUp : inf.directDown
+      let h = '<div class="prop-title" style="margin-top:8px">' + title + '（直接 ' + direct.size + ' · 间接 ' + (closure.size - direct.size) + '）</div>'
+      const rows = influenceRows(state, inst.varName, side)
+      if (!rows.length) {
+        h += '<div class="panel-sub" style="margin:4px 0">无直接依赖</div>'
+      } else {
+        for (const r of rows) {
+          const note = r.kind === 'probe'
+            ? '引用: ' + (r.fields[0] || '') + (r.fields.length > 1 ? ' ×' + r.fields.length : '')
+            : (r.description || '声明边')
+          const noteEsc = esc(note)
+          h += '<div class="inf-row" onclick="selectInfluenceTarget(\'' + esc(r.varName) + '\')">' +
+            '<span class="inf-name">' + esc(nameOf(r.varName)) + '</span>' +
+            '<span class="inf-note" title="' + noteEsc + '">' + noteEsc + '</span>' +
+            '</div>'
+        }
+      }
+      return h
+    }
+    if (dir === 'up' || dir === 'both') html += section('up', '上游')
+    if (dir === 'down' || dir === 'both') html += section('down', '下游')
   }
 
   if (!codeMode && !isType) {

@@ -15,6 +15,7 @@
 | **代码层(真相源)** | `src/codegraph.js` | `runSource` 执行 sourceCode、`serializeCode` 反向构建、`makeBridge` 提供 `GraphStarter.add`、`deriveEdges(state)` + lazy 缓存派生边视图(v0.13 从 io.js 迁入) |
 | **探测边派生** | `src/probe.js` | `deriveProbeEdges(state)`:遍历 attrs 引用推得隐式依赖(同对收敛 + 实例边界,ADR-006),lazy 缓存 + `invalidateProbes`;纯派生不序列化 |
 | **作者态快照** | `src/author.js` | `captureAuthorAttrs`(runSource 捕获)/ `setAuthorAttr` / `deleteAuthorAttr` / `markEdgesEdited`(UI 编辑写穿);serializeCode 的序列化源(ADR-007) |
+| **影响解析** | `src/influence.js` | `computeInfluence(state, varName, direction)`:上游/下游闭包(声明边正向、探测边反向、差集口径,ADR-010)+ `influenceRows` 列表行数据;身份键记忆化,纯派生不持久化 |
 | **scanner** | `src/scanner.js` | 静态分析 sourceCode 字符串,提取 class 定义(读 `new cls()` 实例的 3 个 class field) |
 | **parser** | `src/parser.js` | `splitSource` / `isSourceCodeProgrammatic`(切模式丢什么)+ `classifySource`(外部导入分类器,ADR-008:declarative/programmatic/unknown 三值,`importSource` 闸门判定) |
 | **运行时层** | `src/io.js` | `wrapInstance` 加 getter、state 别名 |
@@ -229,7 +230,9 @@ AI 传输:
 
 **作者态快照(ADR-007)**. `serializeCode` 的序列化源是 `state.authorAttrs`(`runSource` 结束时的作者态深拷贝),不是 live attrs;UI 编辑写穿(panel 改值/加删属性/边编辑、拖拽建边、类型模式传播、删除实例清理入边),方法体/transform/`stepAll` 只改 live。画布/panel/sparkline 仍读 live(演化值可见);reset/undo/import/load 经 `runSource` 自动重建快照。通道 4 override 下划线同源(表达"作者 override")。
 
-**持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。**载入失败保护**:`load()` 反序列化成功但 `runSource` 失败时置 `state.loadError`,`save()` 拒绝覆盖 `sa_data`(防止空画布的下一次编辑抹掉用户图);`loadError` 由成功操作清除(onNew / importSource / codeview commitCode 成功)。**载入守卫**:importSource 校验 version(≠6 拒绝)、尊重数据里的 editMode、UI 模式 + 程序化 sourceCode 时 confirm 推荐切 Code 模式载入。
+**影响解析(ADR-010)**. 选中节点 = 焦点,renderer 每帧取 `computeInfluence(state, selNode.id, state.influenceDir)`:闭包内直接强亮、间接弱亮、不可达 dim;参与路径的声明/探测边全亮,其余 dim(与 hover dim 互斥、覆盖搜索 dim)。panel 影响区展示直接邻居列表(声明边 description / 探测边 field-path ×N)与直接/间接计数,点行跳转选中。语义:声明边正向、探测边反向(依赖方向)、同对差集;纯派生不持久化(缓存以 derive/probe 缓存数组身份为键)。
+
+**持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。**载入失败保护**:`load()` 反序列化成功但 `runSource` 失败时置 `state.loadError`,`save()` 拒绝覆盖 `sa_data`(防止空画布的下一次编辑抹掉用户图);`loadError` 由成功操作清除(onNew / importSource / codeview commitCode 成功)。**载入守卫**:importSource 校验 version(≠6 拒绝)、尊重数据里的 editMode、UI 模式 + 程序化 sourceCode 时 confirm 推荐切 Code 模式载入;外部导入先过 `classifySource` 闸门(declarative 免确认,programmatic/unknown confirm,取消不载入;ADR-008)。
 
 **旧格式硬切换。** v0.9 之前的 `sa_data`(version !== 6,含 v0.5 / v0.6 / v0.7 / v0.8)与 v0.9 不兼容(实例级 edges 模型与历史 class.edges + null 槽风格不兼容)。`load()` 检测到旧版本会丢弃并清空 `sa_data`,返回 false → 走 DEFAULT_BOOTSTRAP(空)。
 
@@ -323,3 +326,14 @@ v0.6/v0.8 时代的"命名端口"被 v0.9 砍掉——边是实例级数组,端�
 28. **外部导入的 sourceCode 必须先过 `classifySource`**,`declarative` 才免确认;`load()`(localStorage)不过闸。
 29. **新外部入口必须走 `importSource`**(闸门唯一咽喉),不得绕过直接 `runSource`。
 30. **dist/index.html 必须携带 meta CSP**(含 `connect-src 'none'`);不得引入任何运行时网络请求(否则 CSP 反噬自身)。
+
+### AI 传输契约不变量(ADR-009)
+
+31. **AI↔人往返的主通道是 sourceCode 文本(代码块)**;URL 是可选快路径与人类分享载体,不是唯一通道。
+32. **"复制给 AI"输出的代码块首行必须是 `// sa-edit: <时间戳>`;粘贴导入必须容忍并剥离围栏与标记行**(标记不参与源码语义)。
+
+### 影响解析不变量(ADR-010)
+
+33. **探测边的影响方向是依赖方向**(u 引用 v ⇒ v 影响 u),与画布箭头相反;同对已有声明边 `u→v` 时探测边不参与影响闭包(差集口径与渲染一致)。
+34. **影响闭包纯派生,不落任何持久化**(不入 sourceCode / URL / localStorage);缓存以 deriveEdges/deriveProbeEdges 的缓存数组身份为键,不新增失效点。
+35. **影响模式不引入新状态机**:焦点 = `state.selNode`,方向 = `state.influenceDir`(会话内,不持久化);不新增第三个模式概念。
