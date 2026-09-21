@@ -144,6 +144,12 @@ export const state = {
   editMode: 'ui',            // 'ui' | 'code'
   panelMode: {},             // { [varName]: 'class' | 'instance' } — UI 临时状态
   influenceDir: 'both',      // ADR-010 影响方向:'up' | 'down' | 'both'(会话内,不持久化)
+  // ADR-011 干预(what-if)假设层:会话内,不落码(不变量 36-38)
+  whatIf: {
+    locked: {},     // 'varName\u0000attr' -> true
+    params: {},     // 'varName\u0000attr' -> 假设值
+    baseline: null, // { traces, values, tickCount, sourceCode }
+  },
 
   // 视图（保留为顶层，方便访问）
   viewX: 0, viewY: 0, viewScale: 1,
