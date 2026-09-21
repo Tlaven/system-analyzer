@@ -17,6 +17,7 @@ import { _equal, invalidateEdges } from './codegraph.js'
 import { setAuthorAttr, deleteAuthorAttr, markEdgesEdited } from './author.js'
 import { showModal } from './modal.js'
 import { computeInfluence, influenceRows } from './influence.js'
+import { isLocked, toggleLock, setHypothesis, diffSummary, baselineStale, whatIfKey } from './whatif.js'
 
 const $ = s => document.querySelector(s)
 const panel = $('#panel')
@@ -613,6 +614,12 @@ function _renderPropField({ propName, cont, inst, cls, codeMode, isType }) {
   row.className = 'field'
 
   function writeVal(newVal) {
+    // ADR-011 假设编辑:写 live + params,不写穿作者态(不变量 36);不改码 → 不 pushUndo
+    if (!isType && isLocked(state, inst.varName, propName)) {
+      setHypothesis(state, inst.varName, propName, newVal)
+      render(); triggerPropagate(inst.varName)
+      return
+    }
     markUndo()
     if (isType) {
       const oldDefault = cls.attrs[propName]
@@ -630,15 +637,30 @@ function _renderPropField({ propName, cont, inst, cls, codeMode, isType }) {
   const canDel = isType ? (propName in (cls.attrs || {})) : (inst.attrs[propName] !== undefined)
   const delBtn = (codeMode || !canDel) ? '' : '<button class="btn-del-prop" data-prop="' + esc(propName) + '" style="padding:2px 8px;font-size:11px;border:1px solid var(--delbd);background:var(--delb);color:var(--delc);border-radius:4px;cursor:pointer;margin-left:6px">删</button>'
   if (t === 'number') {
-    row.innerHTML = '<span class="fl">' + esc(propName) + esc(labelSuffix) + '</span>' +
+    const locked = !isType && isLocked(state, inst.varName, propName)
+    const lockBtn = (!isType && !codeMode)
+      ? '<button class="btn-lock-prop' + (locked ? ' locked' : '') + '" data-prop="' + esc(propName) + '" title="' +
+        (locked ? '解除锁定(恢复作者值)' : '锁定为实验参数(编辑不落码)') + '">' + (locked ? '🔒' : '🔓') + '</button>'
+      : ''
+    row.innerHTML = '<span class="fl">' + esc(propName) + esc(labelSuffix) +
+      (locked ? '<span class="whatif-badge">假设</span>' : '') + '</span>' +
       '<div style="display:flex;align-items:center">' +
-      '<input type="number" step="any" id="np-attr-' + esc(propName) + '" value="' + esc(String(curVal)) + '"' + (codeMode ? ' disabled' : '') + '>' +
-      delBtn + '</div>'
+      '<input type="number" step="any" id="np-attr-' + esc(propName) + '" value="' + esc(String(curVal)) + '"' +
+      (locked ? ' class="whatif-input"' : '') + (codeMode ? ' disabled' : '') + '>' +
+      lockBtn + delBtn + '</div>'
     cont.appendChild(row)
     if (!codeMode) {
       row.querySelector('input').oninput = function() {
         const v = parseFloat(this.value)
         writeVal(isNaN(v) ? 0 : v)
+      }
+      const lock = row.querySelector('.btn-lock-prop')
+      if (lock) {
+        lock.onclick = function() {
+          toggleLock(state, inst.varName, propName)
+          render(); triggerPropagate(inst.varName)
+          showNodePanel(inst)
+        }
       }
     }
     // A1:有历史时序的数值属性行内嵌 sparkline(stepAll 产点,runSource 清空)
@@ -671,19 +693,49 @@ function _renderPropField({ propName, cont, inst, cls, codeMode, isType }) {
 // 数据:state.traces[varName][attr] = {tick, value}[],环形缓冲 200,易失。
 // 写入 stepAll;runSource 清空。连播时 input.js 的 sa-tick 监听调 refreshSparklines 原地重绘(不重建 panel)。
 const SPARK_H = 26
+function _baselinePts(varName, attr) {
+  const b = state.whatIf && state.whatIf.baseline
+  return (b && b.traces[varName] && b.traces[varName][attr]) || null
+}
 function _appendSparkline(row, varName, attr) {
   const pts = (state.traces[varName] || {})[attr]
-  if (!pts || pts.length < 2) return
+  const bpts = _baselinePts(varName, attr)
+  if ((!pts || pts.length < 2) && (!bpts || bpts.length < 2)) return
   const cv = document.createElement('canvas')
   cv.className = 'trace-spark'
   cv.dataset.varName = varName
   cv.dataset.attr = attr
-  cv.title = attr + ' · 最近 ' + pts.length + ' tick'
+  cv.title = attr + ' · 当前 ' + ((pts && pts.length) || 0) + ' tick' +
+    (bpts ? ' · 基线 ' + bpts.length + ' tick' : '')
   row.appendChild(cv)
-  _drawSparkline(cv, pts)
+  _drawSparkline(cv, pts, bpts)
+  _appendWhatIfDelta(row, varName, attr)
 }
 
-function _drawSparkline(cv, pts) {
+// 行内"基线值 → 当前值 Δ"(仅基线存在且数值有差异时)
+function _appendWhatIfDelta(row, varName, attr) {
+  const b = state.whatIf && state.whatIf.baseline
+  if (!b) return
+  const inst = state.runtimeInstances.find(i => i.varName === varName)
+  if (!inst) return
+  const cur = inst.attrs[attr]
+  if (typeof cur !== 'number') return
+  const k = whatIfKey(varName, attr)
+  if (!Object.prototype.hasOwnProperty.call(b.values, k)) return
+  const base = b.values[k]
+  if (cur === base) return
+  const d = cur - base
+  const span = document.createElement('span')
+  span.className = 'whatif-delta'
+  span.innerHTML = '基线 ' + esc(_fmtNum(base)) + ' → <b>' + esc(_fmtNum(cur)) + '</b> (Δ ' + (d >= 0 ? '+' : '') + esc(_fmtNum(d)) + ')'
+  row.appendChild(span)
+}
+function _fmtNum(v) {
+  if (typeof v !== 'number') return String(v)
+  return Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000)
+}
+
+function _drawSparkline(cv, pts, baselinePts) {
   const dpr = window.devicePixelRatio || 1
   const w = cv.clientWidth || 200
   const h = SPARK_H
@@ -692,27 +744,45 @@ function _drawSparkline(cv, pts) {
   const ctx = cv.getContext('2d')
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, w, h)
-  if (!pts || pts.length < 2) return
-  let min = Infinity, max = -Infinity
-  for (const p of pts) {
-    if (p.value < min) min = p.value
-    if (p.value > max) max = p.value
+  const series = []
+  if (baselinePts && baselinePts.length >= 2) series.push(baselinePts)
+  if (pts && pts.length >= 2) series.push(pts)
+  if (!series.length) return
+  let min = Infinity, max = -Infinity, tMin = Infinity, tMax = -Infinity
+  for (const s of series) {
+    for (const p of s) {
+      if (p.value < min) min = p.value
+      if (p.value > max) max = p.value
+      if (p.tick < tMin) tMin = p.tick
+      if (p.tick > tMax) tMax = p.tick
+    }
   }
-  const span = (max - min) || Math.abs(max) || 1
+  const vSpan = (max - min) || Math.abs(max) || 1
+  const tSpan = (tMax - tMin) || 1
   const pad = 3
-  const x = i => pad + (w - pad * 2) * (i / (pts.length - 1))
-  const y = v => h - pad - (h - pad * 2) * ((v - min) / span)
+  const x = p => pad + (w - pad * 2) * ((p.tick - tMin) / tSpan)
+  const y = v => h - pad - (h - pad * 2) * ((v - min) / vSpan)
   const pc = getPaletteColors()
-  ctx.strokeStyle = pc.accent
-  ctx.lineWidth = 1.5
-  ctx.beginPath()
-  pts.forEach((p, i) => { i ? ctx.lineTo(x(i), y(p.value)) : ctx.moveTo(x(i), y(p.value)) })
-  ctx.stroke()
-  const last = pts[pts.length - 1]
-  ctx.beginPath()
-  ctx.arc(x(pts.length - 1), y(last.value), 2.5, 0, Math.PI * 2)
-  ctx.fillStyle = pc.accent
-  ctx.fill()
+  const draw = (s, color, width, dash) => {
+    ctx.strokeStyle = color
+    ctx.lineWidth = width
+    if (dash) ctx.setLineDash(dash)
+    ctx.beginPath()
+    s.forEach((p, i) => { i ? ctx.lineTo(x(p), y(p.value)) : ctx.moveTo(x(p), y(p.value)) })
+    ctx.stroke()
+    ctx.setLineDash([])
+    const last = s[s.length - 1]
+    ctx.beginPath()
+    ctx.arc(x(last), y(last.value), 2.5, 0, Math.PI * 2)
+    ctx.fillStyle = color
+    ctx.fill()
+  }
+  if (baselinePts && baselinePts.length >= 2) {
+    ctx.globalAlpha = 0.55
+    draw(baselinePts, pc.text3, 1, [3, 3])
+    ctx.globalAlpha = 1
+  }
+  if (pts && pts.length >= 2) draw(pts, pc.accent, 1.5, null)
 }
 
 // sa-tick 时原地重绘 panel 里所有 sparkline(保留 panel 滚动/focus 状态)
@@ -721,7 +791,7 @@ export function refreshSparklines() {
   if (!cvs.length) return
   for (const cv of cvs) {
     const pts = (state.traces[cv.dataset.varName] || {})[cv.dataset.attr]
-    _drawSparkline(cv, pts)
+    _drawSparkline(cv, pts, _baselinePts(cv.dataset.varName, cv.dataset.attr))
   }
 }
 
