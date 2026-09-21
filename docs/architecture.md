@@ -16,6 +16,7 @@
 | **探测边派生** | `src/probe.js` | `deriveProbeEdges(state)`:遍历 attrs 引用推得隐式依赖(同对收敛 + 实例边界,ADR-006),lazy 缓存 + `invalidateProbes`;纯派生不序列化 |
 | **作者态快照** | `src/author.js` | `captureAuthorAttrs`(runSource 捕获)/ `setAuthorAttr` / `deleteAuthorAttr` / `markEdgesEdited`(UI 编辑写穿);serializeCode 的序列化源(ADR-007) |
 | **影响解析** | `src/influence.js` | `computeInfluence(state, varName, direction)`:上游/下游闭包(声明边正向、探测边反向、差集口径,ADR-010)+ `influenceRows` 列表行数据;身份键记忆化,纯派生不持久化 |
+| **干预/what-if** | `src/whatif.js` | `state.whatIf` 假设层(锁定集 / params / 基线四元组)+ `replay` 复跑配方 + `diffSummary` 差异行;假设不落码(ADR-011,ADR-007 不变量 27 的显式例外);会话层,纯逻辑 Node 可测 |
 | **scanner** | `src/scanner.js` | 静态分析 sourceCode 字符串,提取 class 定义(读 `new cls()` 实例的 3 个 class field) |
 | **parser** | `src/parser.js` | `splitSource` / `isSourceCodeProgrammatic`(切模式丢什么)+ `classifySource`(外部导入分类器,ADR-008:declarative/programmatic/unknown 三值,`importSource` 闸门判定) |
 | **运行时层** | `src/io.js` | `wrapInstance` 加 getter、state 别名 |
@@ -232,6 +233,8 @@ AI 传输:
 
 **影响解析(ADR-010)**. 选中节点 = 焦点,renderer 每帧取 `computeInfluence(state, selNode.id, state.influenceDir)`:闭包内直接强亮、间接弱亮、不可达 dim;参与路径的声明/探测边全亮,其余 dim(与 hover dim 互斥、覆盖搜索 dim)。panel 影响区展示直接邻居列表(声明边 description / 探测边 field-path ×N)与直接/间接计数,点行跳转选中。语义:声明边正向、探测边反向(依赖方向)、同对差集;纯派生不持久化(缓存以 derive/probe 缓存数组身份为键)。
 
+**干预/what-if(ADR-011)**. 锁定数值属性 = 实验参数(panel 行锁图标);锁定编辑写 live + `state.whatIf.params`,不写穿 authorAttrs(不变量 27 的显式例外)。基线 = `{ traces 深拷贝, values 原始值快照, tickCount, sourceCode }`;复跑 = `runSource → applyHypotheses → runTransforms → stepAll × tickCount`(不 save)。对比:sparkline 基线灰 ghost 叠加 + panel"实验对比"节(锁定参数置顶、|Δ| 降序,点行选中节点)。基线过期判据 = `baseline.sourceCode !== state.sourceCode`。锁定/基线均会话内,不入 sourceCode / URL / localStorage。
+
 **持久化。** `sa_data` 存 `{version:6, sourceCode, visualState, graphId, graphTitle, editMode}`。`sa_config` 存样式 + 主题。URL hash 分享编码 sourceCode(UTF-8 safe base64),上限 24000 字符。**载入失败保护**:`load()` 反序列化成功但 `runSource` 失败时置 `state.loadError`,`save()` 拒绝覆盖 `sa_data`(防止空画布的下一次编辑抹掉用户图);`loadError` 由成功操作清除(onNew / importSource / codeview commitCode 成功)。**载入守卫**:importSource 校验 version(≠6 拒绝)、尊重数据里的 editMode、UI 模式 + 程序化 sourceCode 时 confirm 推荐切 Code 模式载入;外部导入先过 `classifySource` 闸门(declarative 免确认,programmatic/unknown confirm,取消不载入;ADR-008)。
 
 **旧格式硬切换。** v0.9 之前的 `sa_data`(version !== 6,含 v0.5 / v0.6 / v0.7 / v0.8)与 v0.9 不兼容(实例级 edges 模型与历史 class.edges + null 槽风格不兼容)。`load()` 检测到旧版本会丢弃并清空 `sa_data`,返回 false → 走 DEFAULT_BOOTSTRAP(空)。
@@ -337,3 +340,9 @@ v0.6/v0.8 时代的"命名端口"被 v0.9 砍掉——边是实例级数组,端�
 33. **探测边的影响方向是依赖方向**(u 引用 v ⇒ v 影响 u),与画布箭头相反;同对已有声明边 `u→v` 时探测边不参与影响闭包(差集口径与渲染一致)。
 34. **影响闭包纯派生,不落任何持久化**(不入 sourceCode / URL / localStorage);缓存以 deriveEdges/deriveProbeEdges 的缓存数组身份为键,不新增失效点。
 35. **影响模式不引入新状态机**:焦点 = `state.selNode`,方向 = `state.influenceDir`(会话内,不持久化);不新增第三个模式概念。
+
+### 干预/what-if 不变量(ADR-011)
+
+36. **假设值只住 `state.whatIf`(会话层)**:锁定属性的编辑写 live + params,不写穿 `authorAttrs`、不入 sourceCode / URL / localStorage;清除实验回作者态。这是 ADR-007 不变量 27 的显式例外,仅限锁定属性。
+37. **复跑配方固定为 `runSource → applyHypotheses → runTransforms → stepAll × 基线 tickCount`**,复跑不 save;基线四元组含 `sourceCode`,与当前不等即"基线过期",UI 必须提示。
+38. **假设值只在两条路径应用到 live**(锁定编辑 / 复跑);其他 `runSource` 不自动应用假设、不自动清除实验。基线 `values` 只收原始值(number/string/boolean),引用不入快照。

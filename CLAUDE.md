@@ -133,4 +133,5 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
   - [ADR-008 外部导入执行闸门(白名单分类 + 确认 + CSP)](docs/decisions/adr-008-import-execution-gate.md)
   - [ADR-009 AI 传输契约(代码块主通道,URL 降级)](docs/decisions/adr-009-ai-transport-contract.md)
   - [ADR-010 影响解析(选中触发 + 闭包分层 + 探测边依赖方向)](docs/decisions/adr-010-influence-analysis.md)
+  - [ADR-011 干预(what-if):假设层 + 基线/复跑对比](docs/decisions/adr-011-whatif-intervention.md)
 - `docs/archive/` — 历史文档归档(v0.8 及之前的设计文档,设计意图参考,不维护)
