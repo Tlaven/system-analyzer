@@ -1468,6 +1468,94 @@ console.log('\n测试 52：ADR-010 方向切换与列表跳转')
   await page.evaluate(() => window.setInfluenceDir('both'))
 }
 
+const WHATIF_SAMPLE = `class Src { attrs = { rate: 1, out: 0 } }
+class Mid { attrs = { in: 0, out: 0 } }
+class Dst { attrs = { in: 0 } }
+const Src_1 = GraphStarter.add(Src, 'Src_1')
+const Mid_1 = GraphStarter.add(Mid, 'Mid_1')
+const Dst_1 = GraphStarter.add(Dst, 'Dst_1')
+Src_1.edges = [{ target: Mid_1, description: 's→m', transform: "target['in'] = source['out']" }]
+Mid_1.edges = [{ target: Dst_1, description: 'm→d', transform: "target['in'] = source['in'] + source['out']" }]`
+
+console.log('\n测试 53：ADR-011 锁定编辑不落码 + 假设 badge')
+{
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: 'whatif' })
+    const s1 = window.state.runtimeInstances.find(i => i.varName === 'Src_1')
+    window.showNodePanel(s1)
+    window.setPanelMode('instance')
+  }, WHATIF_SAMPLE)
+  await new Promise(r => setTimeout(r, 120))
+  const before = await page.evaluate(() => window.state.sourceCode)
+  await page.evaluate(() => {
+    document.querySelector('.btn-lock-prop[data-prop="rate"]').click()
+  })
+  await new Promise(r => setTimeout(r, 60))
+  await page.evaluate(() => {
+    const inp = document.getElementById('np-attr-rate')
+    inp.value = '9'
+    inp.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await new Promise(r => setTimeout(r, 450))  // 等 triggerPropagate debounce
+  const r = await page.evaluate(() => {
+    const body = document.getElementById('panel-body')
+    return {
+      src: window.state.sourceCode,
+      rate: window.state.runtimeInstances.find(i => i.varName === 'Src_1').attrs.rate,
+      hasBadge: !!body.querySelector('.whatif-badge'),
+      hasLockedBtn: !!body.querySelector('.btn-lock-prop.locked'),
+      w: window.__sa_test.whatif(),
+    }
+  })
+  check('锁定编辑:live rate=9', r.rate === 9, r.rate)
+  check('锁定编辑:sourceCode 不变', r.src === before, { changed: r.src !== before })
+  check('行上"假设"badge + 锁按钮态', r.hasBadge && r.hasLockedBtn, r)
+  check('whatif 状态:锁定 1 · params 记录', r.w.lockedCount === 1 && r.w.params['Src_1\u0000rate'] === 9, r.w)
+}
+
+console.log('\n测试 54：ADR-011 基线/复跑对比 + 清除实验')
+{
+  // 解锁(恢复作者值)→ 等 debounce → 记录基线
+  await page.evaluate(() => { document.querySelector('.btn-lock-prop[data-prop="rate"]').click() })
+  await new Promise(r => setTimeout(r, 400))
+  await page.evaluate(() => window.recordBaseline())
+  await new Promise(r => setTimeout(r, 60))
+  // 重新锁定并改假设 9 → 复跑
+  await page.evaluate(() => { document.querySelector('.btn-lock-prop[data-prop="rate"]').click() })
+  await new Promise(r => setTimeout(r, 60))
+  await page.evaluate(() => {
+    const inp = document.getElementById('np-attr-rate')
+    inp.value = '9'
+    inp.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await new Promise(r => setTimeout(r, 450))
+  const rep = await page.evaluate(() => window.replayExperiment())
+  await new Promise(r => setTimeout(r, 120))
+  const r = await page.evaluate(() => {
+    const body = document.getElementById('panel-body')
+    const rows = [...body.querySelectorAll('.wd-row')].map(el => el.textContent)
+    return {
+      rate: window.state.runtimeInstances.find(i => i.varName === 'Src_1').attrs.rate,
+      w: window.__sa_test.whatif(),
+      hasDiff: !!body.querySelector('.whatif-diff'),
+      rows,
+    }
+  })
+  check('复跑步数 = 基线 tick(0)', rep.steps === 0, rep)
+  check('复跑应用假设(live rate=9)', r.rate === 9, r.rate)
+  check('对比节存在且列出差异行', r.hasDiff && r.rows.length >= 1, r)
+  check('差异行含 Src_1.rate 1 → 9', r.rows.some(t => t.includes('Src_1.rate') && t.includes('1 → 9')), r.rows)
+  await page.evaluate(() => window.clearExperiment())
+  await new Promise(r => setTimeout(r, 100))
+  const c = await page.evaluate(() => ({
+    rate: window.state.runtimeInstances.find(i => i.varName === 'Src_1').attrs.rate,
+    w: window.__sa_test.whatif(),
+    hasDiff: !!document.getElementById('panel-body').querySelector('.whatif-diff'),
+  }))
+  check('清除实验:rate 回作者值 1', c.rate === 1, c.rate)
+  check('清除实验:锁定/基线清空 + 对比节消失', c.w.lockedCount === 0 && !c.w.hasBaseline && !c.hasDiff, c)
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)
