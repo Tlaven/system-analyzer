@@ -16,6 +16,7 @@ import { runSource, _equal, formatValue } from './codegraph.js'
 import { deriveProbeEdges } from './probe.js'
 import { authorAttrsOf, markEdgesEdited } from './author.js'
 import { computeInfluence } from './influence.js'
+import { captureBaseline, replay, clearExperiment, baselineStale, lockedCount, diffSummary } from './whatif.js'
 
 // 测试与调试钩子
 window.state = state
@@ -158,6 +159,39 @@ window.setExecMode = function(val) {
   render()
 }
 window.runPropagate = function(instId) { propagate(instId); render() }
+
+// ============ ADR-011 干预(what-if)实验菜单动作 ============
+window.recordBaseline = function() {
+  captureBaseline(state)
+  render()
+  if (state.selInstance) showNodePanel(state.selInstance)
+}
+window.replayExperiment = function() {
+  stopPlay()  // 复跑自带 stepAll,避免与连播叠加
+  const r = replay(state)
+  wrapAllInstances()
+  render()
+  if (state.selInstance) showNodePanel(state.selInstance)
+  return r
+}
+window.clearExperiment = function() {
+  clearExperiment(state)
+  wrapAllInstances()
+  render()
+  if (state.selInstance) showNodePanel(state.selInstance)
+}
+window.__sa_test.whatif = function() {
+  const w = state.whatIf
+  return {
+    locked: Object.keys(w.locked),
+    params: { ...w.params },
+    hasBaseline: !!w.baseline,
+    baselineTick: w.baseline ? w.baseline.tickCount : 0,
+    stale: baselineStale(state),
+    diffs: diffSummary(state),
+    lockedCount: lockedCount(state),
+  }
+}
 
 // v0.7 Phase 2：UI 模式新建/复制节点入口（Code 模式不响应）
 window.createNode = createNode
@@ -467,7 +501,19 @@ window.toggleMenu = function(name) {
   if (!trig || !menu) return
   const isOpen = menu.classList.contains('open')
   closeAllMenus()
-  if (!isOpen) { menu.classList.add('open'); trig.classList.add('open') }
+  if (!isOpen) {
+    menu.classList.add('open'); trig.classList.add('open')
+    // ADR-011:实验菜单状态行(打开时刷新)
+    if (name === 'whatif') {
+      const el = document.getElementById('whatif-status')
+      if (el) {
+        const w = state.whatIf
+        el.textContent = '锁定 ' + lockedCount(state) + ' · 基线 ' +
+          (w.baseline ? w.baseline.tickCount + ' tick' : '无') +
+          (w.baseline && baselineStale(state) ? ' · 可能过期' : '')
+      }
+    }
+  }
 }
 
 function closeAllMenus() {

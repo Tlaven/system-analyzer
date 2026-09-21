@@ -161,6 +161,16 @@ html,body{width:100%;height:100%;overflow:hidden;font-family:-apple-system,Blink
     </div>
   </div>
   <div class="menu-group">
+    <button class="menu-trigger" data-menu="whatif" onclick="toggleMenu('whatif')">实验 ▾</button>
+    <div class="dropdown-menu" data-menu="whatif">
+      <div class="menu-item" onclick="recordBaseline()">记录基线</div>
+      <div class="menu-item" onclick="replayExperiment()">复跑(应用假设)</div>
+      <div class="menu-item" onclick="clearExperiment()">清除实验</div>
+      <div class="menu-sep"></div>
+      <div class="menu-label" id="whatif-status">锁定 0 · 基线 无</div>
+    </div>
+  </div>
+  <div class="menu-group">
     <button class="menu-trigger" data-menu="style" onclick="toggleMenu('style')">样式 ▾</button>
     <div class="dropdown-menu" data-menu="style">
       <div class="menu-label">自动布局</div>
