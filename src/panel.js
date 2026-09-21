@@ -407,6 +407,29 @@ export function showNodePanel(inst, highlightRef) {
   let html = '<div class="panel-id">' + esc(inst.varName) + '</div>'
   html += '<div class="panel-sub">' + esc(inst.className) + '</div>'
 
+  // ADR-011 实验对比节(基线存在时显示;全局差异列表,点行定位)
+  const _b = state.whatIf.baseline
+  if (_b && !isType) {
+    const rows = diffSummary(state)
+    const stale = baselineStale(state)
+    let h = '<div class="whatif-diff">' +
+      '<div class="wd-title"><span>实验对比 · 基线 ' + _b.tickCount + ' tick</span>' +
+      (stale ? '<span class="wd-warn">基线可能过期(图已变更)</span>' : '') + '</div>'
+    if (!rows.length) {
+      h += '<div class="wd-empty">与基线无差异(改假设值或点"复跑")</div>'
+    } else {
+      for (const r of rows) {
+        const dTxt = r.delta === null ? '' : ' (Δ ' + (r.delta >= 0 ? '+' : '') + _fmtNum(r.delta) + ')'
+        h += '<div class="wd-row" data-var="' + esc(r.varName) + '" data-attr="' + esc(r.attr) + '">' +
+          '<span>' + (r.locked ? '🔒 ' : '') + esc(_whatIfNodeName(r.varName)) + '.' + esc(r.attr) + '</span>' +
+          '<span class="wd-val">' + esc(_fmtNum(r.base)) + ' → <b>' + esc(_fmtNum(r.cur)) + '</b>' + esc(dTxt) + '</span>' +
+          '</div>'
+      }
+    }
+    h += '</div>'
+    html += h
+  }
+
   const typeActive = isType ? ' active' : ''
   const instActive = !isType ? ' active' : ''
   const toggleDis = codeMode ? ' disabled' : ''
@@ -526,6 +549,25 @@ export function showNodePanel(inst, highlightRef) {
   panelBody.innerHTML = html
   panel.classList.remove('hidden')
 
+  // ADR-011 对比行点击:选中该节点(panel 切换);同节点则高亮对应属性行
+  panelBody.querySelectorAll('.whatif-diff .wd-row').forEach(el => {
+    el.onclick = function() {
+      const target = state.runtimeInstances.find(i => i.varName === this.dataset.var)
+      if (!target) return
+      if (target === inst) {
+        const inp = document.getElementById('np-attr-' + this.dataset.attr)
+        const rowEl = inp && inp.closest('.field')
+        if (rowEl) {
+          rowEl.style.background = 'var(--addp-hbg)'
+          rowEl.scrollIntoView({ behavior: 'auto', block: 'center' })
+        }
+        return
+      }
+      window.selectInstance(target)
+      showNodePanel(target)
+    }
+  })
+
   // 渲染每个属性
   if (cls) {
     const cont = document.getElementById('props-cont')
@@ -605,6 +647,13 @@ export function showNodePanel(inst, highlightRef) {
       block.scrollIntoView({ behavior: 'auto', block: 'center' })
     }
   }
+}
+
+function _whatIfNodeName(varName) {
+  const n = state.runtimeInstances.find(i => i.varName === varName)
+  if (!n) return varName
+  const c = state.classes[n.className]
+  return n.attrs.name || (c && c.name) || varName
 }
 
 // 属性字段渲染
