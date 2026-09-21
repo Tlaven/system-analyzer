@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **做什么:** 节点 + 边 + 属性的可视化编辑,支持 UI 拖拽编辑和 Code 代码编辑双模式,边级 transform 表达式(轻量响应式——改上游 attr 自动重算下游),Canvas 渲染(三档信息密度 + 多种布线 + 多种布局)。
 
-**不做什么:** 不做后端服务(纯静态单文件);不做用户系统(无登录无云端同步,localStorage + URL hash 分享);不做实时多人协作;不做**全自动演示式动画**(边样式 dashFlow/particleFlow 属样式层选项,不是产品方向;ADR-005 相应拆分"时序动画"歧义)。执行引擎的 step 推进已激活为**执行观测支柱**(ADR-005):属性时序记录(panel sparkline)+ 步进连播 + 环边标记,MVP 已实现(见 docs/roadmap.md);单次重算 propagate/evalTransforms 响应式路径持续可用。另有**双层边(探测边)L1**(ADR-006):声明边(实线,作者意图)+ 探测边(虚线,从 attrs 引用推得的隐式依赖),引用值 attr 以 varName 持久化。
+**不做什么:** 不做后端服务(纯静态单文件);不做用户系统(无登录无云端同步,localStorage + URL hash 分享);不做实时多人协作;不做**全自动演示式动画**(边样式 dashFlow/particleFlow 属样式层选项,不是产品方向;ADR-005 相应拆分"时序动画"歧义)。执行引擎的 step 推进已激活为**执行观测支柱**(ADR-005):属性时序记录(panel sparkline)+ 步进连播 + 环边标记,MVP 已实现(见 docs/roadmap.md);单次重算 propagate/evalTransforms 响应式路径持续可用。另有**双层边(探测边)L1**(ADR-006):声明边(实线,作者意图)+ 探测边(虚线,从 attrs 引用推得的隐式依赖),引用值 attr 以 varName 持久化。干预(what-if)已立(ADR-011):逐属性锁定假设层 + 基线/复跑对比,假设不落码。
 
 ## [为什么] — 设计哲学
 
@@ -36,10 +36,11 @@ node scripts/test-engine.mjs           # 执行观测单元测试(traces 记录/
 node scripts/test-roundtrip.mjs        # scanner 静态分析单元测试(无浏览器)
 node scripts/test-skeleton.mjs         # 骨架验证(往返不动点 fuzz + 编辑风暴 + 边界钉子,无浏览器)
 node scripts/test-influence.mjs        # 影响解析单元测试(闭包/探测边反向/差集,无浏览器)
+node scripts/test-whatif.mjs           # what-if 干预单元测试(锁定/假设/基线/复跑/差异,无浏览器)
 node scripts/test-e2e.mjs              # puppeteer, loads dist/index.html — MUST `npm run build` first
 ```
 
-No test runner, lint, or typecheck. Verification is manual in the browser, plus the six `.mjs` scripts above.
+No test runner, lint, or typecheck. Verification is manual in the browser, plus the seven `.mjs` scripts above.
 
 ## 架构
 
@@ -47,7 +48,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 
 > **详见 [docs/architecture.md](docs/architecture.md)(L2 架构层)** —— 模块清单、双模式编辑 + 实例级 edges 模型、主流程叙述、关键架构决策、架构级不变量。
 
-一句话概要:sourceCode 字符串 → `runSource` 派生 runtimeInstances → `deriveEdges` 派生边视图 → Canvas 渲染;边上有 transform 时 `evalTransforms` 在渲染前求值(`propagate` / `runTransforms` 两个入口)。UI 模式 panel 编辑可双向同步回 sourceCode;Code 模式 codeview 编辑触发 `runSource` 重建。执行观测:`stepAll` 推进 tick 并写 `state.traces`,panel 属性行画 sparkline,环边红色虚线标记(ADR-005)。双层边:探测边从 attrs 引用推得(虚线灰,同对收敛),与声明边(实线)分层渲染(ADR-006)。影响解析:选中节点 → 上游/下游闭包高亮 + panel 依赖列表(声明边正向、探测边反向,ADR-010)。
+一句话概要:sourceCode 字符串 → `runSource` 派生 runtimeInstances → `deriveEdges` 派生边视图 → Canvas 渲染;边上有 transform 时 `evalTransforms` 在渲染前求值(`propagate` / `runTransforms` 两个入口)。UI 模式 panel 编辑可双向同步回 sourceCode;Code 模式 codeview 编辑触发 `runSource` 重建。执行观测:`stepAll` 推进 tick 并写 `state.traces`,panel 属性行画 sparkline,环边红色虚线标记(ADR-005)。双层边:探测边从 attrs 引用推得(虚线灰,同对收敛),与声明边(实线)分层渲染(ADR-006)。影响解析:选中节点 → 上游/下游闭包高亮 + panel 依赖列表(声明边正向、探测边反向,ADR-010)。干预:逐属性锁定假设 + 基线/复跑对比(ADR-011)。
 
 ---
 
@@ -114,6 +115,7 @@ Vanilla JS + Canvas 2D, no framework. ES modules in `src/` are bundled by esbuil
 - **序列化源是作者态快照(ADR-007)**——`serializeCode` 只写 `state.authorAttrs`(runSource 捕获、UI 编辑写穿);方法体/transform/stepAll 的演化值不进 sourceCode,reset 恢复作者态。新增改 attrs 的 UI 入口必须同步写穿(`src/author.js`)。
 - **外部导入的 sourceCode 必须先过 `classifySource`(ADR-008)**——declarative 免确认,programmatic/unknown 弹阻断式 confirm;闸门唯一咽喉是 `importSource`(返回布尔,取消不载入),localStorage 载入不过闸。dist 必须携带 meta CSP(`connect-src 'none'`),不得引入运行时网络请求。
 - **AI↔人往返的主通道是 sourceCode 代码块(ADR-009)**——"复制给 AI"输出首行带 sa-edit 标记;粘贴导入必须容忍并剥离围栏与标记行;URL 是可选快路径与人类分享载体,不是唯一通道。
+- **干预假设不落码(ADR-011)**——锁定属性的编辑只写 live + 会话层 `state.whatIf`,不写穿作者态、不入 sourceCode/URL/localStorage;复跑配方固定 `runSource → applyHypotheses → runTransforms → stepAll × 基线 tickCount`;锁定/基线不持久化。
 
 ## Documentation
 

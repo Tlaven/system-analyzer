@@ -40,10 +40,11 @@ node scripts/test-engine.mjs       # 执行观测单元测试(traces/环成员�
 node scripts/test-roundtrip.mjs    # scanner 静态分析单元测试(无浏览器)
 node scripts/test-skeleton.mjs     # 骨架验证(往返不动点 fuzz + 编辑风暴 + 边界钉子,无浏览器)
 node scripts/test-influence.mjs    # 影响解析单元测试(闭包/探测边反向/差集,无浏览器)
+node scripts/test-whatif.mjs       # what-if 干预单元测试(锁定/假设/基线/复跑/差异,无浏览器)
 node scripts/test-e2e.mjs          # puppeteer e2e(loads dist/index.html — MUST build first)
 ```
 
-无 test runner / lint / typecheck。验证靠上面四个 `.mjs` 脚本 + 浏览器手动验证。
+无 test runner / lint / typecheck。验证靠上面七个 `.mjs` 脚本 + 浏览器手动验证。
 
 ## 怎么用
 
@@ -71,6 +72,14 @@ ADR 列表:
 - [ADR-001 边模型从 class 级迁到实例级](docs/decisions/adr-001-instance-level-edges.md)
 - [ADR-002 双模式编辑(UI / Code)](docs/decisions/adr-002-dual-mode-editing.md)
 - [ADR-003 边级 transform 表达式(轻量响应式)](docs/decisions/adr-003-edge-transform-expressions.md)
+- [ADR-004 中文标识符分层支持](docs/decisions/adr-004-unicode-identifiers.md)
+- [ADR-005 执行观测立柱(step 推进激活)](docs/decisions/adr-005-execution-observation.md)
+- [ADR-006 双层边(探测边)L1](docs/decisions/adr-006-probe-edges-l1.md)
+- [ADR-007 编辑快照层(演化值不自动固化)](docs/decisions/adr-007-author-snapshot-layer.md)
+- [ADR-008 外部导入执行闸门(白名单分类 + 确认 + CSP)](docs/decisions/adr-008-import-execution-gate.md)
+- [ADR-009 AI 传输契约(代码块主通道,URL 降级)](docs/decisions/adr-009-ai-transport-contract.md)
+- [ADR-010 影响解析(选中触发 + 闭包分层 + 探测边依赖方向)](docs/decisions/adr-010-influence-analysis.md)
+- [ADR-011 干预(what-if):假设层 + 基线/复跑对比](docs/decisions/adr-011-whatif-intervention.md)
 
 ## 示例
 
