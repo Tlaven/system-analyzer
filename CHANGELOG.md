@@ -6,6 +6,7 @@
 
 ### Added
 
+- **探测边 hover tooltip + 命中测试(B-L1 补全)**:hover 探测边全亮加粗,tooltip 标题 `源 → 目标` + 列出全部 field-path(`隐式引用(未声明, N 处)`);命中几何与渲染一致(恒直线;声明边优先、探测边兜底),差集内不可见探测边与自引用不参与命中;`rectExit` 从 renderer 迁入 utils(渲染/命中同源);e2e 55(4 项)
 - **干预(what-if)(ADR-011)**:逐属性锁定假设层(锁定编辑写 live + 会话层 params,不写穿作者态;解锁恢复作者值)+ 基线四元组(traces 深拷贝/原始值快照/tickCount/sourceCode)+ 一键复跑(`runSource → applyHypotheses → runTransforms → stepAll × tickCount`,不 save)+ 对比视图(sparkline 基线灰 ghost 叠加 + panel 实验对比节差异列表,点行定位);新 `src/whatif.js` 纯函数 + 第七套测试 `scripts/test-whatif.mjs`(34 项)+ e2e 53-54(10 项)
 - **影响解析(ADR-010)**:选中节点 → 上游/下游闭包画布聚焦(直接强/间接弱/不可达 dim;方向三选默认双向)+ panel 影响区(直接/间接计数、来源注 description / field-path ×N、点行跳转);探测边按**依赖方向**参与(引用方被影响),同对差集口径;新 `src/influence.js` 纯函数 + 身份键记忆化;新增第六套测试 `scripts/test-influence.mjs`(27 项)+ e2e 51-52
 - **AI 传输契约(ADR-009)**:往返主通道改为 sourceCode 代码块("粘贴源码…"自动剥围栏与 sa-edit 标记 + "复制给 AI"一键回传);URL 降级为 <4k 快路径;llms.txt 重写(不要 fetch URL、执行确认是预期);utils.stripCodeBlock / buildAICopyText 纯函数 + Node 单测 8 项 + e2e 49-50

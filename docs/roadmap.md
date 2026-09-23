@@ -29,7 +29,6 @@
 ## B. 双层边(探测边) — L1 已实现,移出(ADR-006,历史在 git);L2 缓期
 
 - **L2(Proxy 化,真·赋值即图变)远期**:需要独立 ADR——破坏 attrs 恒等、伤 JSON round-trip 与双身份系统,等 L1 语义确认后评估
-- 探测边 hover tooltip(全部 field-path)与命中测试暂未做(标签只显示首路径 + ×N)
 
 ---
 
