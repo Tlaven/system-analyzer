@@ -1,5 +1,6 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, PORT_R, PORT_HIT, EDGE_HIT, isDark } from './state.js'
 import { deriveEdges, nodeIndex } from './codegraph.js'
+import { deriveProbeEdges } from './probe.js'
 
 // minimal 模式 → 圆形几何；medium/full → 圆角矩形
 function isCircleMode() {
@@ -461,6 +462,39 @@ export function hitEdge(x, y) {
       // degrade（3+ 遮挡）→ 直线 fallback
     }
     if (distSeg(x, y, p1.x, p1.y, p2.x, p2.y) < EDGE_HIT) return e
+  }
+  return null
+}
+
+// 探测边端点:从节点中心沿连线方向与矩形边界求交(medium/full;minimal 走 edgePts 圆周)
+export function rectExit(n, other) {
+  const r = getNodeRect(n)
+  const dx = other.x - n.x, dy = other.y - n.y
+  const d = Math.hypot(dx, dy) || 1
+  const ux = dx / d, uy = dy / d
+  const tx = ux !== 0 ? (r.w / 2) / Math.abs(ux) : Infinity
+  const ty = uy !== 0 ? (r.h / 2) / Math.abs(uy) : Infinity
+  const t = Math.min(tx, ty)
+  return { x: n.x + ux * t, y: n.y + uy * t }
+}
+
+// B-L1 探测边命中测试:几何与渲染一致(恒直线;minimal 圆周 / medium-full 矩形边界)。
+// 差集口径:同对已有声明边(渲染不画)与自引用不参与命中——看不见的边不可 hover。
+// 优先级由调用方决定(声明边先查,探测边兜底)。
+export function hitProbeEdge(x, y) {
+  const probes = deriveProbeEdges(state)
+  if (!probes.length) return null
+  const declaredPairs = new Set(deriveEdges(state).map(e => e.source_instance + '>' + e.target_instance))
+  const byId = nodeIndex(state)
+  for (let i = probes.length - 1; i >= 0; i--) {
+    const pe = probes[i]
+    if (declaredPairs.has(pe.id) || pe.source_instance === pe.target_instance) continue
+    const s = byId.get(pe.source_instance), t = byId.get(pe.target_instance)
+    if (!s || !t) continue
+    let p1, p2
+    if (config.infoLevel === 'minimal') ({ p1, p2 } = edgePts(s, t, pe))
+    else { p1 = rectExit(s, t); p2 = rectExit(t, s) }
+    if (distSeg(x, y, p1.x, p1.y, p2.x, p2.y) < EDGE_HIT) return pe
   }
   return null
 }

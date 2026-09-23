@@ -9,7 +9,7 @@ import { toggleCodeView, commitCodeNow, setCodeViewReadOnly } from './codeview.j
 import { loadConfig, saveConfig, applyTheme } from './config.js'
 import { showNodePanel, showEdgePanel, refreshSparklines } from './panel.js'
 import { showModal } from './modal.js'
-import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName, stripCodeBlock, buildAICopyText } from './utils.js'
+import { cCoords, screenToWorld, hitNode, hitHandle, hitEdge, hitPort, getNodeRect, rectEdge, isEditing, detectSnap, esc, isValidIdentifier, suggestUniqueVarName, stripCodeBlock, buildAICopyText, hitProbeEdge } from './utils.js'
 import { stepAll, propagate, runTransforms } from './engine.js'
 import { splitSource, isSourceCodeProgrammatic } from './parser.js'
 import { runSource, _equal, formatValue } from './codegraph.js'
@@ -27,6 +27,8 @@ window.invalidateEdges = invalidateEdges
 window.__sa_test = window.__sa_test || {}
 window.__sa_test.importJSON = importJSON
 window.__sa_test.probeEdges = () => deriveProbeEdges(state)
+window.__sa_test.hitProbeEdge = (x, y) => hitProbeEdge(x, y)
+window.__sa_test.updateTooltip = updateTooltip
 window.setEditMode = setEditMode
 // v0.7 Phase 5: 暴露给测试用的辅助函数
 window.selectEdge = selectEdge
@@ -713,7 +715,7 @@ export function initInput() {
       return
     }
     const n = hitNode(p.x, p.y)
-    const edge = n ? null : hitEdge(p.x, p.y)
+    const edge = n ? null : (hitEdge(p.x, p.y) || hitProbeEdge(p.x, p.y))
     const newHoverEdge = edge ? edge.id : null
     if (n !== state.hoverInstance || newHoverEdge !== state.hoverEdge) {
       state.hoverInstance = n
@@ -778,7 +780,7 @@ export function initInput() {
     // v0.7 Phase 2：双击空白新建节点（UI 模式）
     if (state.editMode === 'code') return
     const p = cCoords(e)
-    if (hitNode(p.x, p.y) || hitEdge(p.x, p.y)) return
+    if (hitNode(p.x, p.y) || hitEdge(p.x, p.y) || hitProbeEdge(p.x, p.y)) return
     createNodeAt(p.x, p.y)
   }
 

@@ -1556,6 +1556,49 @@ console.log('\n测试 54：ADR-011 基线/复跑对比 + 清除实验')
   check('清除实验:锁定/基线清空 + 对比节消失', c.w.lockedCount === 0 && !c.w.hasBaseline && !c.hasDiff, c)
 }
 
+const PROBE_HIT_SAMPLE = `class A { attrs = { v: 1, ref: null, box: { inner: null }, c: null } }
+class B { attrs = { v: 2 } }
+class C { attrs = { v: 3 } }
+const A_1 = GraphStarter.add(A, 'A_1')
+const B_1 = GraphStarter.add(B, 'B_1')
+const C_1 = GraphStarter.add(C, 'C_1')
+A_1.ref = B_1
+A_1.box.inner = B_1
+A_1.c = C_1
+A_1.edges = [{ target: C_1, description: 'declared' }]`
+
+console.log('\n测试 55：B-L1 探测边 hover tooltip + 命中测试')
+{
+  await page.evaluate((src) => {
+    window.__sa_test.importJSON({ sourceCode: src, title: 'probe-hit' })
+  }, PROBE_HIT_SAMPLE)
+  await new Promise(r => setTimeout(r, 120))
+  const r = await page.evaluate(() => {
+    const byName = (v) => window.state.runtimeInstances.find(i => i.varName === v)
+    const a = byName('A_1'), b = byName('B_1'), c = byName('C_1')
+    const mid = (p, q) => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 })
+    const mb = mid(a, b), mc = mid(a, c)
+    const hitB = window.__sa_test.hitProbeEdge(mb.x, mb.y)
+    const hitC = window.__sa_test.hitProbeEdge(mc.x, mc.y)
+    // 探测边 hover → tooltip 列出全部 field-path
+    window.state.hoverEdge = 'A_1>B_1'
+    window.__sa_test.updateTooltip()
+    const tip = document.getElementById('tip')
+    return {
+      hitB: hitB && { id: hitB.id, fields: hitB.fields },
+      hitC: hitC,
+      tipHidden: tip.classList.contains('hidden'),
+      tipText: tip.textContent,
+      probeCount: window.__sa_test.probeEdges().length,
+    }
+  })
+  check('探测边可命中(A_1>B_1, 全部 field-path)', r.hitB && r.hitB.id === 'A_1>B_1' && r.hitB.fields.join() === 'ref,box.inner', r.hitB)
+  check('差集内探测边不参与命中(声明对 A_1>C_1 → null)', r.hitC === null, r.hitC)
+  check('tooltip 可见且标题为 源 → 目标', !r.tipHidden && r.tipText.includes('A_1 → B_1'), r.tipText)
+  check('tooltip 列出全部隐式引用(2 处: ref / box.inner)', r.tipText.includes('隐式引用(未声明,2 处)') && r.tipText.includes('· ref') && r.tipText.includes('· box.inner'), r.tipText)
+  await page.evaluate(() => { window.state.hoverEdge = null; window.__sa_test.updateTooltip() })
+}
+
 await browser.close()
 console.log(`\n总计: ${pass} 通过, ${fail} 失败`)
 process.exit(fail > 0 ? 1 : 0)

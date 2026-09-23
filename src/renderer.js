@@ -1,22 +1,11 @@
 import { state, config, NODE_MIN_W, NODE_MAX_W, NODE_PAD, NODE_RADIUS, PORT_R, ARROW_SZ, getPaletteColors } from './state.js'
-import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, formatScalar } from './utils.js'
+import { getNodeRect, getNodeH, computeCurveGeometry, findOrthogonalChannel, edgePts, getHandlePoints, getEdgeStyle, truncateText, formatScalar, rectExit } from './utils.js'
 import { deriveEdges, nodeIndex, _equal } from './codegraph.js'
 import { getCycleMembers } from './engine.js'
 import { deriveProbeEdges } from './probe.js'
 import { authorAttrsOf } from './author.js'
 import { computeInfluence } from './influence.js'
 
-// 探测边端点:从节点中心沿连线方向与矩形边界求交(medium/full;minimal 走 edgePts 圆周)
-function rectExit(n, other) {
-  const r = getNodeRect(n)
-  const dx = other.x - n.x, dy = other.y - n.y
-  const d = Math.hypot(dx, dy) || 1
-  const ux = dx / d, uy = dy / d
-  const tx = ux !== 0 ? (r.w / 2) / Math.abs(ux) : Infinity
-  const ty = uy !== 0 ? (r.h / 2) / Math.abs(uy) : Infinity
-  const t = Math.min(tx, ty)
-  return { x: n.x + ux * t, y: n.y + uy * t }
-}
 
 export function drawGrid() {
   const pc = getPaletteColors()
@@ -46,13 +35,20 @@ export function updateTooltip() {
   const tip = document.getElementById('tip')
   if (!tip) return
   if (state.mode || state.isDown) { tip.classList.add('hidden'); return }
-  let title = '', desc = '', err = ''
+  let title = '', desc = '', err = '', probeFields = null
   if (state.hoverEdge) {
     const e = deriveEdges(state).find(ed => ed.id === state.hoverEdge)
     if (e) {
       // v0.9：边没有 ref 名，标题显示 `源 → 目标`，描述是 per-edge description
       title = (e.source_instance || '') + ' → ' + (e.target_instance || '')
       desc = e.description || ''
+    } else {
+      // B-L1 探测边 hover:标题同构,正文列出全部 field-path(未声明的隐式引用)
+      const pe = deriveProbeEdges(state).find(p => p.id === state.hoverEdge)
+      if (pe) {
+        title = (pe.source_instance || '') + ' → ' + (pe.target_instance || '')
+        probeFields = pe.fields
+      }
     }
   } else if (state.hoverNode) {
     if (state.hoverNode.error) err = state.hoverNode.error
@@ -64,7 +60,11 @@ export function updateTooltip() {
   const lines = []
   if (err) { lines.push('⚠ ' + err); lines.push('') }
   if (title) lines.push(title)
-  if (desc) {
+  if (probeFields) {
+    lines.push('')
+    lines.push('隐式引用(未声明,' + probeFields.length + ' 处):')
+    for (const f of probeFields) lines.push('· ' + f)
+  } else if (desc) {
     const d = desc.length > 80 ? desc.slice(0, 80) + '…' : desc
     lines.push(''); lines.push(d)
   }
@@ -164,10 +164,11 @@ export function render() {
     if (config.infoLevel === 'minimal') ({ p1, p2 } = edgePts(s, t, pe))
     else { p1 = rectExit(s, t); p2 = rectExit(t, s) }
     const _pst = _inf ? _inf.probeState.get(pe.id) : null
+    const _pHover = state.hoverEdge === pe.id
     ctx.save()
     ctx.strokeStyle = pc.text3
-    ctx.globalAlpha = _inf ? (_pst ? 0.85 : 0.15) : 0.5
-    ctx.lineWidth = _inf && _pst ? 1.8 : 1.4
+    ctx.globalAlpha = _inf ? (_pst ? 0.85 : 0.15) : (_pHover ? 1 : 0.5)
+    ctx.lineWidth = _inf && _pst ? 1.8 : (_pHover ? 2.2 : 1.4)
     ctx.setLineDash([4, 4])
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke()
     ctx.setLineDash([])
@@ -184,7 +185,7 @@ export function render() {
       ctx.font = '10px "Microsoft YaHei",sans-serif'
       const txt = truncateText(ctx, label, 120)
       const tw = ctx.measureText(txt).width
-      ctx.globalAlpha = _inf ? (_pst ? 0.7 : 0.15) : 0.7
+      ctx.globalAlpha = _inf ? (_pst ? 0.7 : 0.15) : (_pHover ? 1 : 0.7)
       ctx.fillStyle = pc.bg
       ctx.fillRect(mx - tw / 2 - 3, my - 8, tw + 6, 13)
       ctx.fillStyle = pc.text3
