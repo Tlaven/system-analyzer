@@ -71,6 +71,13 @@
 
 > 用户拿 2-3 个 AI(有/无代码执行各一)各跑一轮后补记。判定表:URL 可打开 / 编码错误 / 被聊天客户端截断 / 正确降级为代码块。
 
+**跑法(每轮 ~3 分钟):**
+
+1. 新开一轮对话,把 `src/llms.txt` 全文作为工具说明书贴给 AI(或让它 fetch 部署地址的 `/llms.txt`)
+2. 给需求:"用下面的代码生成一张图,按说明书给我链接;链接打不开就给我代码块" + 粘贴一个 fixture
+3. 打开链接验证:能打开 / 编码错乱 / 被客户端截断 / AI 主动降级给了代码块
+4. 一行结果填进文末"结果记录"表(2-3 个 AI 各一轮即可)
+
 fixture A(小图,纯声明):
 
 ```js
@@ -100,4 +107,10 @@ const Sink_1 = GraphStarter.add(Sink, 'Sink_1')
 Source_1.edges = [{ target: Sink_1, description: '主数据流', transform: "target['in'] = source['out']\ntarget['doubled'] = target['in'] * 2" }]
 ```
 
-fixture C(中文重图,20+ 节点、中文 key):按游戏经济循环自拟,含 `库存`/`价格`/`需求` 等 key 与多条带 transform 的边。
+fixture C(中文重图,中文 key):直接用 `examples/frostpunk2_resources.js`(冰汽时代 2 资源循环,8 实例 + 中文 key + transform)。
+
+### 结果记录
+
+| AI(模型/入口) | 代码块可用 | URL 结果 | 备注 |
+|---|---|---|---|
+| (待填) | | | |
